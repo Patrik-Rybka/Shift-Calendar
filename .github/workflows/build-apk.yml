@@ -1,0 +1,64 @@
+name: Sestavit Android APK (GitHub CI)
+
+on:
+  workflow_dispatch: # Umožňuje ruční spuštění jedním kliknutím v GitHub rozhraní
+  push:
+    tags:
+      - 'v*' # Automaticky se spustí při vytvoření nového tagu/vydání (např. v1.0.1)
+
+jobs:
+  build:
+    name: Sestavení samostatného APK balíčku
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Klonování repozitáře
+        uses: actions/checkout@v4
+
+      - name: ⚙️ Nastavení Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: ☕ Nastavení Java JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: 📱 Nastavení Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: 📦 Instalace npm balíčků
+        run: npm ci
+
+      - name: 🏗️ Expo Prebuild (Generování Android projektu)
+        run: npx expo prebuild --platform android --clean
+        env:
+          EXPO_PUBLIC_NEON_DATABASE_URL: ${{ secrets.EXPO_PUBLIC_NEON_DATABASE_URL || 'postgresql://neondb_owner:npg_fuYT61GtsckZ@ep-round-block-b169al35-pooler.c-5.eu-central-1.aws.neon.tech/neondb?sslmode=require' }}
+
+      - name: 🔨 Kompilace APK pomocí Gradle
+        working-directory: android
+        run: ./gradlew assembleRelease --no-daemon
+        env:
+          EXPO_PUBLIC_NEON_DATABASE_URL: ${{ secrets.EXPO_PUBLIC_NEON_DATABASE_URL || 'postgresql://neondb_owner:npg_fuYT61GtsckZ@ep-round-block-b169al35-pooler.c-5.eu-central-1.aws.neon.tech/neondb?sslmode=require' }}
+
+      - name: 🔍 Příprava hotového APK souboru
+        run: |
+          mkdir -p build-output
+          find android/app/build/outputs/apk/ -name "*.apk" -exec cp {} build-output/kalendar-smen.apk \;
+
+      - name: 📤 Uložení APK jako artefaktu v GitHub Actions
+        uses: actions/upload-artifact@v4
+        with:
+          name: kalendar-smen-apk
+          path: build-output/kalendar-smen.apk
+
+      - name: 🚀 Automatické připojení k GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: build-output/kalendar-smen.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
