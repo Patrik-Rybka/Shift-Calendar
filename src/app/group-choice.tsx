@@ -215,7 +215,7 @@ export default function GroupChoiceScreen() {
                 onPress={handleShareCode}
               >
                 <Share2 size={20} color="#FFFFFF" />
-                <Text style={styles.actionBtnText}>Sdílet kód rodině (WhatsApp, SMS...)</Text>
+                <Text style={styles.actionBtnText}>Sdílet kód</Text>
               </TouchableOpacity>
 
               {/* Continue to Profile */}
