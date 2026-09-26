@@ -6,7 +6,8 @@ import { fileURLToPath } from 'node:url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const dbUrl = process.env.DATABASE_URL || 'postgresql://neondb_owner:npg_fuYT61GtsckZ@ep-round-block-b169al35-pooler.c-5.eu-central-1.aws.neon.tech/neondb?sslmode=require';
+const dbUrl = process.env.DATABASE_URL || process.env.EXPO_PUBLIC_NEON_DATABASE_URL;
+if (!dbUrl) throw new Error('Chybí proměnná DATABASE_URL v souboru .env');
 
 const sql = neon(dbUrl);
 
