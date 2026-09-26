@@ -7,8 +7,8 @@ import {
   Animated,
   TouchableOpacity,
   Dimensions,
-  useColorScheme,
 } from 'react-native';
+import { useColorScheme } from '@/hooks/use-color-scheme';
 import { Check, Sparkles, CloudCheck } from 'lucide-react-native';
 
 interface SuccessConfettiModalProps {

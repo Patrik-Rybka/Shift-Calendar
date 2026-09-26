@@ -1,7 +1,7 @@
 import React from 'react';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { useColorScheme } from 'react-native';
+import { useColorScheme } from '@/hooks/use-color-scheme';
 
 export default function RootLayout() {
   const isDark = useColorScheme() === 'dark';
@@ -18,6 +18,7 @@ export default function RootLayout() {
         <Stack.Screen name="index" />
         <Stack.Screen name="welcome" />
         <Stack.Screen name="auth" />
+        <Stack.Screen name="settings" options={{ animation: 'slide_from_right' }} />
       </Stack>
     </>
   );

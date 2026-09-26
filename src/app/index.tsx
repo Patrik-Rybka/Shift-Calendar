@@ -7,11 +7,11 @@ import {
   RefreshControl,
   TouchableOpacity,
   Modal,
-  useColorScheme,
   ActivityIndicator,
   Alert,
   AppState,
 } from 'react-native';
+import { useColorScheme } from '@/hooks/use-color-scheme';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import {
@@ -24,10 +24,13 @@ import {
   FileText,
   UserPlus,
   Pencil,
+  Eye,
+  EyeOff,
 } from 'lucide-react-native';
 
 import { useAuthStore } from '@/store/useAuthStore';
 import { useShiftStore, getShiftMapKey } from '@/store/useShiftStore';
+import { useSettingsStore } from '@/store/useSettingsStore';
 import { getGroupPresets } from '@/services/db/shiftService';
 import { fetchGroupShiftsRange } from '@/services/db/syncService';
 import { CalendarDay, getDatesBetween, formatLocalDate } from '@/utils/calendarUtils';
@@ -38,6 +41,12 @@ import EditToolbar from '@/components/calendar/EditToolbar';
 import ShiftPickerModal from '@/components/calendar/ShiftPickerModal';
 import SuccessConfettiModal from '@/components/common/SuccessConfettiModal';
 import AddMemberModal from '@/components/calendar/AddMemberModal';
+import { UpdateModal } from '@/components/common/UpdateModal';
+import {
+  checkForUpdate,
+  getCurrentAppVersion,
+  ReleaseInfo,
+} from '@/services/updateService';
 
 function formatCzechDateFull(dateStr: string): string {
   const [y, m, d] = dateStr.split('-').map(Number);
@@ -56,6 +65,17 @@ export default function CalendarScreen() {
   const isDark = useColorScheme() === 'dark';
 
   const { currentUser, currentGroup, groupMembers, setGroupMembers } = useAuthStore();
+  const {
+    cellStyle,
+    hiddenMemberIds,
+    toggleMemberVisibility,
+    setAllMembersVisible,
+    memberOrderIds,
+    fontSizeScale,
+    calendarDensity,
+  } = useSettingsStore();
+
+  const fontMultiplier = fontSizeScale === 'small' ? 0.88 : fontSizeScale === 'large' ? 1.18 : 1.0;
   const {
     presets,
     setPresets,
@@ -87,6 +107,8 @@ export default function CalendarScreen() {
   const [confettiSubtitle, setConfettiSubtitle] = useState('Vše je úspěšně synchronizováno v cloudu');
   const [addMemberModalVisible, setAddMemberModalVisible] = useState(false);
   const [currentInitialNote, setCurrentInitialNote] = useState<string | null>(null);
+  const [updateModalVisible, setUpdateModalVisible] = useState(false);
+  const [availableRelease, setAvailableRelease] = useState<ReleaseInfo | null>(null);
 
   const ui = {
     bg: isDark ? '#090D16' : '#F8FAFC',
@@ -106,6 +128,23 @@ export default function CalendarScreen() {
       router.replace('/group-choice' as any);
     }
   }, [currentUser, currentGroup]);
+
+  // Silent update check na pozadí při startu
+  useEffect(() => {
+    const checkSilentUpdate = async () => {
+      try {
+        const result = await checkForUpdate();
+        if (result.hasUpdate && result.release) {
+          setAvailableRelease(result.release);
+          setUpdateModalVisible(true);
+        }
+      } catch {
+        // Tichá kontrola na pozadí tiše ignoruje případný offline stav
+      }
+    };
+    const timer = setTimeout(checkSilentUpdate, 2500);
+    return () => clearTimeout(timer);
+  }, []);
 
   // Load presets & sync initial shifts
   useEffect(() => {
@@ -164,37 +203,342 @@ export default function CalendarScreen() {
     );
   }
 
-  // Render shift badges inside each calendar day cell (Step 5.3)
-  const renderCellContent = (day: CalendarDay) => {
-    const dayShifts: Array<{
+  // 7.4C: Ordered and filtered members
+  const orderedMembers = React.useMemo(() => {
+    if (!groupMembers || groupMembers.length === 0) return [];
+    if (!memberOrderIds || memberOrderIds.length === 0) return groupMembers;
+
+    return [...groupMembers].sort((a, b) => {
+      const idxA = memberOrderIds.indexOf(a.id);
+      const idxB = memberOrderIds.indexOf(b.id);
+      const sortA = idxA === -1 ? 9999 : idxA;
+      const sortB = idxB === -1 ? 9999 : idxB;
+      return sortA - sortB;
+    });
+  }, [groupMembers, memberOrderIds]);
+
+  // Helper to extract shifts for a given calendar day (Step 7.4C respects ordering and hidden filter)
+  const getDayShifts = (day: CalendarDay) => {
+    const list: Array<{
       member: typeof groupMembers[0];
       preset?: typeof presets[0];
       customHours?: number | null;
       note?: string | null;
+      color: string;
+      title: string;
     }> = [];
 
-    // Find shifts for all family members for this day
-    for (const member of groupMembers) {
+    for (const member of orderedMembers) {
+      // Step 7.4C: Skip if member is hidden from calendar view
+      if (hiddenMemberIds.includes(member.id)) {
+        continue;
+      }
+
       const key = getShiftMapKey(member.id, day.dateStr);
       const shift = shifts[key];
       if (shift && (shift.shift_preset_id || (shift.note && shift.note.trim().length > 0))) {
         const preset = shift.shift_preset_id ? presets.find((p) => p.id === shift.shift_preset_id) : undefined;
-        dayShifts.push({
+        const color = preset?.color || member.color || '#2563EB';
+        const title = preset?.title || preset?.short_code || shift.note || 'Poznámka';
+        list.push({
           member,
           preset,
           customHours: shift.custom_hours,
           note: shift.note,
+          color,
+          title,
         });
       }
     }
+    return list;
+  };
 
+  // Render background for day cell (Step 7.4A - full_fill / 50-50 split)
+  const renderCellBg = (day: CalendarDay) => {
+    if (cellStyle !== 'full_fill') return null;
+    const dayShifts = getDayShifts(day);
     if (dayShifts.length === 0) return null;
 
+    if (dayShifts.length === 1) {
+      const col = dayShifts[0].color;
+      return (
+        <View
+          style={[
+            StyleSheet.absoluteFill,
+            {
+              backgroundColor: isDark ? `${col}40` : `${col}24`,
+              borderLeftWidth: 3.5,
+              borderLeftColor: col,
+            },
+          ]}
+        />
+      );
+    }
+
+    if (dayShifts.length === 2) {
+      // 50/50 split exactly as user requested: "půl na půl zabarvené"
+      const col1 = dayShifts[0].color;
+      const col2 = dayShifts[1].color;
+      return (
+        <View style={[StyleSheet.absoluteFill, { flexDirection: 'row' }]}>
+          <View
+            style={{
+              flex: 1,
+              backgroundColor: isDark ? `${col1}40` : `${col1}24`,
+              borderLeftWidth: 3,
+              borderLeftColor: col1,
+            }}
+          />
+          <View
+            style={{
+              width: 1,
+              backgroundColor: isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.08)',
+            }}
+          />
+          <View
+            style={{
+              flex: 1,
+              backgroundColor: isDark ? `${col2}40` : `${col2}24`,
+              borderRightWidth: 3,
+              borderRightColor: col2,
+            }}
+          />
+        </View>
+      );
+    }
+
+    // 3 or more shifts: divided vertical columns
+    return (
+      <View style={[StyleSheet.absoluteFill, { flexDirection: 'row' }]}>
+        {dayShifts.slice(0, 3).map((item, idx) => (
+          <View
+            key={`fill_${idx}`}
+            style={{
+              flex: 1,
+              backgroundColor: isDark ? `${item.color}40` : `${item.color}24`,
+              borderLeftWidth: idx === 0 ? 3 : 0,
+              borderLeftColor: item.color,
+            }}
+          />
+        ))}
+      </View>
+    );
+  };
+
+  // Render shift items inside each calendar day cell (Step 5.3 & Step 7.4A)
+  const renderCellContent = (day: CalendarDay) => {
+    const dayShifts = getDayShifts(day);
+    if (dayShifts.length === 0) return null;
+
+    // Style 0: Classic Blocks with FULL text (Maminka / Směny style)
+    if (cellStyle === 'blocks') {
+      return (
+        <View style={styles.blocksContainer}>
+          {dayShifts.slice(0, 2).map((item, idx) => {
+            const blockBg = isDark ? `${item.color}35` : `${item.color}22`;
+            const textColor = isDark ? '#FFFFFF' : '#0F172A';
+
+            return (
+              <View
+                key={`${item.member.id}_${idx}`}
+                style={[
+                  styles.blockRow,
+                  {
+                    backgroundColor: blockBg,
+                    borderLeftColor: item.color,
+                    paddingVertical: calendarDensity === 'compact' ? 1 : 2,
+                    paddingHorizontal: 2.5,
+                  },
+                ]}
+              >
+                {/* Line 1: Shift Title */}
+                <Text
+                  style={[
+                    styles.blockTitleText,
+                    {
+                      color: textColor,
+                      fontSize: Math.round(8.5 * fontMultiplier),
+                      lineHeight: Math.round(10.5 * fontMultiplier),
+                    },
+                  ]}
+                  numberOfLines={1}
+                >
+                  {item.title}
+                </Text>
+
+                {/* Line 2: Member Name / Note */}
+                <View style={styles.blockSubRow}>
+                  {item.note && (
+                    <FileText size={7} color={item.color} style={{ marginRight: 2 }} />
+                  )}
+                  <Text
+                    style={[
+                      styles.blockMemberText,
+                      {
+                        color: isDark ? '#E2E8F0' : '#475569',
+                        fontSize: Math.round(7.5 * fontMultiplier),
+                        lineHeight: Math.round(9 * fontMultiplier),
+                      },
+                    ]}
+                    numberOfLines={1}
+                  >
+                    {item.member.display_name}
+                  </Text>
+                </View>
+              </View>
+            );
+          })}
+          {dayShifts.length > 2 && (
+            <Text style={[styles.moreCountText, { color: ui.textMuted, fontSize: Math.round(8 * fontMultiplier) }]}>
+              +{dayShifts.length - 2}
+            </Text>
+          )}
+        </View>
+      );
+    }
+
+    // Style 1: Minimalist Dots
+    if (cellStyle === 'dots') {
+      const hasAnyNote = dayShifts.some((s) => s.note && s.note.trim().length > 0);
+      return (
+        <View style={styles.dotsContainer}>
+          <View style={styles.dotsRow}>
+            {dayShifts.slice(0, 4).map((item, idx) => (
+              <View
+                key={`${item.member.id}_${idx}`}
+                style={[
+                  styles.shiftDot,
+                  {
+                    backgroundColor: item.color,
+                    borderColor: isDark ? 'rgba(255,255,255,0.35)' : 'rgba(0,0,0,0.15)',
+                  },
+                ]}
+              />
+            ))}
+            {dayShifts.length > 4 && (
+              <Text style={[styles.dotsMoreText, { color: ui.textMuted }]}>
+                +{dayShifts.length - 4}
+              </Text>
+            )}
+          </View>
+          {hasAnyNote && (
+            <View style={styles.dotsNoteRow}>
+              <FileText size={9} color={isDark ? '#93C5FD' : '#2563EB'} />
+            </View>
+          )}
+        </View>
+      );
+    }
+
+    // Style 2: Bottom Strip / Bars
+    if (cellStyle === 'bottom_strip') {
+      return (
+        <View style={styles.stripContainer}>
+          <View style={styles.stripItemsList}>
+            {dayShifts.slice(0, 2).map((item, idx) => (
+              <View
+                key={`${item.member.id}_${idx}`}
+                style={[
+                  styles.stripChip,
+                  {
+                    backgroundColor: isDark ? `${item.color}25` : `${item.color}18`,
+                    borderLeftColor: item.color,
+                    paddingVertical: calendarDensity === 'compact' ? 1 : 2,
+                  },
+                ]}
+              >
+                <View
+                  style={[
+                    styles.memberDot,
+                    { backgroundColor: item.member.color || item.color },
+                  ]}
+                />
+                <Text
+                  style={[
+                    styles.stripChipText,
+                    {
+                      color: isDark ? '#F9FAFB' : '#0F172A',
+                      fontSize: Math.round(8 * fontMultiplier),
+                    },
+                  ]}
+                  numberOfLines={1}
+                >
+                  {item.title}
+                </Text>
+                {item.note && (
+                  <FileText size={7.5} color={item.color} style={{ marginLeft: 1 }} />
+                )}
+              </View>
+            ))}
+          </View>
+
+          {/* Crisp bottom color track running along cell bottom */}
+          <View style={styles.bottomStripeTrack}>
+            {dayShifts.slice(0, 3).map((item, idx) => (
+              <View
+                key={`bar_${idx}`}
+                style={[styles.bottomStripeSegment, { backgroundColor: item.color }]}
+              />
+            ))}
+          </View>
+        </View>
+      );
+    }
+
+    // Style 3: Full Fill
+    if (cellStyle === 'full_fill') {
+      return (
+        <View style={styles.fullFillContainer}>
+          {dayShifts.slice(0, 2).map((item, idx) => (
+            <View
+              key={`${item.member.id}_${idx}`}
+              style={[
+                styles.fullFillChip,
+                {
+                  backgroundColor: isDark ? 'rgba(0,0,0,0.65)' : 'rgba(255,255,255,0.92)',
+                  borderColor: isDark ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.1)',
+                  paddingVertical: calendarDensity === 'compact' ? 1 : 2,
+                },
+              ]}
+            >
+              <View
+                style={[
+                  styles.memberDot,
+                  { backgroundColor: item.member.color || item.color },
+                ]}
+              />
+              <Text
+                style={[
+                  styles.fullFillChipText,
+                  {
+                    color: isDark ? '#FFFFFF' : '#0F172A',
+                    fontSize: Math.round(8.5 * fontMultiplier),
+                  },
+                ]}
+                numberOfLines={1}
+              >
+                {item.title}
+              </Text>
+              {item.note && (
+                <FileText size={7.5} color={isDark ? '#93C5FD' : '#2563EB'} style={{ marginLeft: 1 }} />
+              )}
+            </View>
+          ))}
+          {dayShifts.length > 2 && (
+            <Text style={[styles.moreCountText, { color: isDark ? '#FFFFFF' : '#0F172A', fontSize: Math.round(8 * fontMultiplier) }]}>
+              +{dayShifts.length - 2}
+            </Text>
+          )}
+        </View>
+      );
+    }
+
+    // Style 4: Classic Badge / Pills (default)
     return (
       <View style={styles.cellShiftsContainer}>
         {dayShifts.slice(0, 3).map((item, idx) => {
-          const pillColor = item.preset?.color || item.member.color || '#2563EB';
-          const title = item.preset?.title || item.preset?.short_code || item.note || 'Poznámka';
+          const pillColor = item.color;
+          const title = item.title;
 
           return (
             <View
@@ -204,31 +548,30 @@ export default function CalendarScreen() {
                 {
                   backgroundColor: isDark ? `${pillColor}25` : `${pillColor}18`,
                   borderColor: isDark ? `${pillColor}50` : `${pillColor}40`,
+                  paddingVertical: calendarDensity === 'compact' ? 1 : 2.5,
                 },
               ]}
             >
-              {/* Member Color Indicator Dot */}
               <View
                 style={[
                   styles.memberDot,
                   { backgroundColor: item.member.color || '#0EA5E9' },
                 ]}
               />
-
-              {/* Note icon if note is attached */}
-              {item.note && item.note.trim().length > 0 && (
+              {item.note && (
                 <FileText
                   size={8.5}
                   color={isDark ? '#93C5FD' : '#2563EB'}
                   strokeWidth={2.5}
                 />
               )}
-
-              {/* Shift Title (clean, no brackets) */}
               <Text
                 style={[
                   styles.shiftPillText,
-                  { color: isDark ? '#F9FAFB' : '#0F172A' },
+                  {
+                    color: isDark ? '#F9FAFB' : '#0F172A',
+                    fontSize: Math.round(8.5 * fontMultiplier),
+                  },
                 ]}
                 numberOfLines={1}
                 ellipsizeMode="tail"
@@ -240,7 +583,7 @@ export default function CalendarScreen() {
         })}
 
         {dayShifts.length > 3 && (
-          <Text style={[styles.moreCountText, { color: ui.textMuted }]}>
+          <Text style={[styles.moreCountText, { color: ui.textMuted, fontSize: Math.round(8 * fontMultiplier) }]}>
             +{dayShifts.length - 3} další
           </Text>
         )}
@@ -463,6 +806,7 @@ export default function CalendarScreen() {
         <CalendarGrid
           onDayPress={handleDayPress}
           renderCellContent={renderCellContent}
+          renderCellBg={renderCellBg}
           isDateSelected={isDateSelected}
           isEditMode={isEditMode}
           onRangeDragChange={handleRangeDragChange}
@@ -480,32 +824,72 @@ export default function CalendarScreen() {
                   Rodina ({groupMembers.length})
                 </Text>
               </View>
-              <TouchableOpacity
-                style={[styles.addMemberBtnSmall, { borderColor: ui.border, backgroundColor: isDark ? '#161F33' : '#F1F5F9' }]}
-                onPress={() => setAddMemberModalVisible(true)}
-                activeOpacity={0.75}
-              >
-                <UserPlus size={13} color={ui.accent} />
-                <Text style={[styles.addMemberBtnSmallText, { color: ui.accent }]}>+ Přidat člena</Text>
-              </TouchableOpacity>
+              <View style={styles.summaryActionsRight}>
+                {hiddenMemberIds.length > 0 && (
+                  <TouchableOpacity
+                    style={[styles.showAllBtnSmall, { borderColor: ui.border, backgroundColor: isDark ? '#161F33' : '#F1F5F9' }]}
+                    onPress={setAllMembersVisible}
+                    activeOpacity={0.75}
+                  >
+                    <Eye size={12} color={ui.accent} />
+                    <Text style={[styles.showAllBtnSmallText, { color: ui.accent }]}>
+                      Zobrazit vše ({hiddenMemberIds.length} skryto)
+                    </Text>
+                  </TouchableOpacity>
+                )}
+                <TouchableOpacity
+                  style={[styles.addMemberBtnSmall, { borderColor: ui.border, backgroundColor: isDark ? '#161F33' : '#F1F5F9' }]}
+                  onPress={() => setAddMemberModalVisible(true)}
+                  activeOpacity={0.75}
+                >
+                  <UserPlus size={13} color={ui.accent} />
+                  <Text style={[styles.addMemberBtnSmallText, { color: ui.accent }]}>+ Přidat člena</Text>
+                </TouchableOpacity>
+              </View>
             </View>
 
             <View style={styles.membersListRow}>
-              {groupMembers.map((member) => (
-                <View key={member.id} style={[styles.memberTag, { backgroundColor: isDark ? '#161F33' : '#F1F5F9', borderColor: ui.border }]}>
-                  <View style={[styles.legendAvatarCircle, { backgroundColor: member.color }]}>
-                    <Text style={styles.legendAvatarText}>
-                      {member.display_name.charAt(0).toUpperCase()}
+              {orderedMembers.map((member) => {
+                const isHidden = hiddenMemberIds.includes(member.id);
+                return (
+                  <TouchableOpacity
+                    key={member.id}
+                    style={[
+                      styles.memberTag,
+                      {
+                        backgroundColor: isDark ? '#161F33' : '#F1F5F9',
+                        borderColor: isHidden ? (isDark ? 'rgba(255,255,255,0.06)' : '#CBD5E1') : ui.border,
+                        opacity: isHidden ? 0.45 : 1,
+                      },
+                    ]}
+                    onPress={() => toggleMemberVisibility(member.id)}
+                    activeOpacity={0.7}
+                  >
+                    <View style={[styles.legendAvatarCircle, { backgroundColor: isHidden ? '#64748B' : member.color }]}>
+                      <Text style={styles.legendAvatarText}>
+                        {member.display_name.charAt(0).toUpperCase()}
+                      </Text>
+                    </View>
+                    <Text
+                      style={[
+                        styles.memberNameText,
+                        {
+                          color: isHidden ? ui.textMuted : ui.text,
+                          textDecorationLine: isHidden ? 'line-through' : 'none',
+                        },
+                      ]}
+                    >
+                      {member.display_name} {member.id === currentUser?.id && '(Já)'}
                     </Text>
-                  </View>
-                  <Text style={[styles.memberNameText, { color: ui.text }]}>
-                    {member.display_name} {member.id === currentUser?.id && '(Já)'}
-                  </Text>
-                  {member.role === 'admin' && (
-                    <Crown size={12} color="#F59E0B" />
-                  )}
-                </View>
-              ))}
+                    {member.role === 'admin' && (
+                      <Crown size={12} color={isHidden ? ui.textMuted : '#F59E0B'} />
+                    )}
+                    {isHidden ? (
+                      <EyeOff size={12} color={ui.textMuted} />
+                    ) : null}
+                  </TouchableOpacity>
+                );
+              })}
             </View>
           </View>
         )}
@@ -570,9 +954,32 @@ export default function CalendarScreen() {
                 </TouchableOpacity>
               </View>
 
+              {/* Czech Holiday Banner if this day is a national holiday */}
+              {selectedDayDetail.holidayName && (
+                <View
+                  style={[
+                    styles.modalHolidayBanner,
+                    {
+                      backgroundColor: isDark ? 'rgba(239, 68, 68, 0.16)' : '#FEE2E2',
+                      borderColor: isDark ? 'rgba(239, 68, 68, 0.35)' : '#FCA5A5',
+                    },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.modalHolidayBannerText,
+                      { color: isDark ? '#FCA5A5' : '#B91C1C' },
+                    ]}
+                  >
+                    🇨🇿 Státní svátek: {selectedDayDetail.holidayName}
+                  </Text>
+                </View>
+              )}
+
               {/* Members Shifts List for the Day */}
               <View style={styles.modalShiftsList}>
-                {groupMembers.map((member) => {
+                {orderedMembers.map((member) => {
+                  const isHidden = hiddenMemberIds.includes(member.id);
                   const key = getShiftMapKey(member.id, selectedDayDetail.dateStr);
                   const shift = shifts[key];
                   const preset = shift?.shift_preset_id
@@ -580,20 +987,27 @@ export default function CalendarScreen() {
                     : null;
 
                   return (
-                    <View key={member.id} style={{ gap: 4 }}>
+                    <View key={member.id} style={{ gap: 4, opacity: isHidden ? 0.6 : 1 }}>
                       <View
                         style={[styles.modalMemberRow, { borderColor: ui.border }]}
                       >
                         {/* Member Info */}
                         <View style={styles.modalMemberInfo}>
-                          <View style={[styles.memberAvatarSmall, { backgroundColor: member.color }]}>
+                          <View style={[styles.memberAvatarSmall, { backgroundColor: isHidden ? '#64748B' : member.color }]}>
                             <Text style={styles.memberAvatarInitial}>
                               {member.display_name.charAt(0).toUpperCase()}
                             </Text>
                           </View>
-                          <Text style={[styles.modalMemberName, { color: ui.text }]}>
-                            {member.display_name} {member.id === currentUser?.id && '(Já)'}
-                          </Text>
+                          <View>
+                            <Text style={[styles.modalMemberName, { color: ui.text }]}>
+                              {member.display_name} {member.id === currentUser?.id && '(Já)'}
+                            </Text>
+                            {isHidden && (
+                              <Text style={{ fontSize: 10.5, color: ui.textMuted, fontStyle: 'italic' }}>
+                                (v kalendáři skryt)
+                              </Text>
+                            )}
+                          </View>
                         </View>
 
                         {/* Shift Badge or Off */}
@@ -610,11 +1024,15 @@ export default function CalendarScreen() {
                             <Text style={[styles.modalShiftTitle, { color: preset.color }]}>
                               {preset.title}
                             </Text>
-                            {preset.start_time && preset.end_time && (
+                            {preset.start_time && preset.end_time ? (
                               <Text style={[styles.modalShiftTimes, { color: ui.textMuted }]}>
                                 {preset.start_time} – {preset.end_time} ({preset.hours}h)
                               </Text>
-                            )}
+                            ) : preset.hours !== undefined && preset.hours !== null && preset.hours > 0 ? (
+                              <Text style={[styles.modalShiftTimes, { color: ui.textMuted }]}>
+                                {preset.hours}h
+                              </Text>
+                            ) : null}
                           </View>
                         ) : (
                           <Text style={[styles.noShiftText, { color: ui.textMuted }]}>
@@ -671,6 +1089,14 @@ export default function CalendarScreen() {
           onOpenAddMember={() => setAddMemberModalVisible(true)}
         />
       )}
+
+      {/* 9. GitHub Autoupdater Modal */}
+      <UpdateModal
+        visible={updateModalVisible}
+        release={availableRelease}
+        currentVersion={getCurrentAppVersion()}
+        onClose={() => setUpdateModalVisible(false)}
+      />
     </SafeAreaView>
   );
 }
@@ -687,26 +1113,60 @@ const styles = StyleSheet.create({
   scrollContent: {
     paddingBottom: 40,
   },
+  // Classic Blocks styles (Maminka / Směny style - Step 7.4A)
+  blocksContainer: {
+    width: '100%',
+    gap: 2,
+    flex: 1,
+    justifyContent: 'flex-start',
+  },
+  blockRow: {
+    width: '100%',
+    borderRadius: 5,
+    paddingVertical: 2,
+    paddingHorizontal: 2,
+    borderLeftWidth: 3,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  blockTitleText: {
+    fontSize: 10,
+    fontWeight: '800',
+    textAlign: 'center',
+    lineHeight: 12,
+  },
+  blockSubRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 0.5,
+  },
+  blockMemberText: {
+    fontSize: 8.5,
+    fontWeight: '700',
+    textAlign: 'center',
+    lineHeight: 10.5,
+  },
   cellShiftsContainer: {
-    gap: 2.5,
+    gap: 2,
     width: '100%',
   },
   shiftPill: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 3,
-    paddingHorizontal: 4,
-    paddingVertical: 2,
-    borderRadius: 6,
+    gap: 2,
+    paddingHorizontal: 2.5,
+    paddingVertical: 1.5,
+    borderRadius: 5,
     borderWidth: 1,
   },
   memberDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
+    width: 4.5,
+    height: 4.5,
+    borderRadius: 2.25,
   },
   shiftPillText: {
-    fontSize: 10,
+    fontSize: 9.5,
     fontWeight: '700',
     flexShrink: 1,
   },
@@ -714,6 +1174,91 @@ const styles = StyleSheet.create({
     fontSize: 9,
     fontWeight: '600',
     textAlign: 'center',
+  },
+  // Full Fill styles (Step 7.4A)
+  fullFillContainer: {
+    gap: 2,
+    width: '100%',
+    paddingTop: 1,
+  },
+  fullFillChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    paddingHorizontal: 4,
+    paddingVertical: 2,
+    borderRadius: 5,
+    borderWidth: 1,
+  },
+  fullFillChipText: {
+    fontSize: 9.5,
+    fontWeight: '800',
+    flexShrink: 1,
+  },
+  // Bottom Strip styles (Step 7.4A)
+  stripContainer: {
+    flex: 1,
+    justifyContent: 'space-between',
+    width: '100%',
+  },
+  stripItemsList: {
+    gap: 2,
+    width: '100%',
+  },
+  stripChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    paddingHorizontal: 3,
+    paddingVertical: 1.5,
+    borderRadius: 4,
+    borderLeftWidth: 2.5,
+  },
+  stripChipText: {
+    fontSize: 9,
+    fontWeight: '700',
+    flexShrink: 1,
+  },
+  bottomStripeTrack: {
+    flexDirection: 'row',
+    height: 3.5,
+    borderRadius: 2,
+    overflow: 'hidden',
+    marginTop: 2,
+    gap: 1.5,
+  },
+  bottomStripeSegment: {
+    flex: 1,
+    height: '100%',
+    borderRadius: 1.5,
+  },
+  // Dots styles (Step 7.4A)
+  dotsContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+    paddingTop: 2,
+  },
+  dotsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+    flexWrap: 'wrap',
+  },
+  shiftDot: {
+    width: 9,
+    height: 9,
+    borderRadius: 4.5,
+    borderWidth: 1,
+  },
+  dotsMoreText: {
+    fontSize: 8.5,
+    fontWeight: '700',
+  },
+  dotsNoteRow: {
+    marginTop: 1,
   },
   familySummaryBox: {
     marginHorizontal: 16,
@@ -926,6 +1471,39 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   addMemberBtnSmallText: {
+    fontSize: 11.5,
+    fontWeight: '700',
+  },
+  modalHolidayBanner: {
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 9,
+    borderWidth: 1,
+    marginTop: 8,
+    marginBottom: 4,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalHolidayBannerText: {
+    fontSize: 12,
+    fontWeight: '800',
+    textAlign: 'center',
+  },
+  summaryActionsRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  showAllBtnSmall: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    borderRadius: 12,
+    borderWidth: 1,
+  },
+  showAllBtnSmallText: {
     fontSize: 11.5,
     fontWeight: '700',
   },

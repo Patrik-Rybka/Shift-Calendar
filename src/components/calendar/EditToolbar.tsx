@@ -4,12 +4,12 @@ import {
   Text,
   TouchableOpacity,
   StyleSheet,
-  useColorScheme,
   ScrollView,
   ActivityIndicator,
   Alert,
   Platform,
 } from 'react-native';
+import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   X,
@@ -20,6 +20,7 @@ import {
 } from 'lucide-react-native';
 import { useShiftStore } from '@/store/useShiftStore';
 import { useAuthStore } from '@/store/useAuthStore';
+import { useSettingsStore } from '@/store/useSettingsStore';
 
 interface EditToolbarProps {
   onSave?: () => Promise<void>;
@@ -31,6 +32,7 @@ export default function EditToolbar({ onSave, onCancel, onOpenAddMember }: EditT
   const isDark = useColorScheme() === 'dark';
   const insets = useSafeAreaInsets();
   const { currentUser, groupMembers } = useAuthStore();
+  const { memberOrderIds } = useSettingsStore();
   const {
     isEditMode,
     setEditMode,
@@ -40,6 +42,20 @@ export default function EditToolbar({ onSave, onCancel, onOpenAddMember }: EditT
     pendingChanges,
     syncStatus,
   } = useShiftStore();
+
+  const orderedMembers = React.useMemo(() => {
+    if (!groupMembers || groupMembers.length === 0) return [];
+    if (!memberOrderIds || memberOrderIds.length === 0) return groupMembers;
+
+    return [...groupMembers].sort((a, b) => {
+      const idxA = memberOrderIds.indexOf(a.id);
+      const idxB = memberOrderIds.indexOf(b.id);
+      if (idxA === -1 && idxB === -1) return 0;
+      if (idxA === -1) return 1;
+      if (idxB === -1) return -1;
+      return idxA - idxB;
+    });
+  }, [groupMembers, memberOrderIds]);
 
   if (!isEditMode) return null;
 
@@ -148,7 +164,7 @@ export default function EditToolbar({ onSave, onCancel, onOpenAddMember }: EditT
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.memberPillsScroll}
       >
-        {groupMembers.map((member) => {
+        {orderedMembers.map((member) => {
           const isActive = currentEditingId === member.id;
           const memberColor = member.color || '#3B82F6';
 

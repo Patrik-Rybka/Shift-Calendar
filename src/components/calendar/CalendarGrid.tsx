@@ -4,20 +4,24 @@ import {
   Text,
   TouchableOpacity,
   StyleSheet,
-  useColorScheme,
   PanResponder,
 } from 'react-native';
+import { useColorScheme } from '@/hooks/use-color-scheme';
 import {
   CalendarDay,
-  WEEKDAY_NAMES_CS,
+  WEEKDAY_NAMES_CS_MON,
+  WEEKDAY_NAMES_CS_SUN,
   generateWeeks,
+  getIsoWeekNumber,
 } from '@/utils/calendarUtils';
 import { useShiftStore } from '@/store/useShiftStore';
+import { useSettingsStore } from '@/store/useSettingsStore';
 
 interface CalendarGridProps {
   onDayPress?: (day: CalendarDay) => void;
   onDayLongPress?: (day: CalendarDay) => void;
   renderCellContent?: (day: CalendarDay) => React.ReactNode;
+  renderCellBg?: (day: CalendarDay) => React.ReactNode;
   isDateSelected?: (dateStr: string) => boolean;
   isEditMode?: boolean;
   onRangeDragChange?: (startDateStr: string, endDateStr: string) => void;
@@ -29,6 +33,7 @@ export default function CalendarGrid({
   onDayPress,
   onDayLongPress,
   renderCellContent,
+  renderCellBg,
   isDateSelected,
   isEditMode = false,
   onRangeDragChange,
@@ -37,8 +42,24 @@ export default function CalendarGrid({
 }: CalendarGridProps) {
   const isDark = useColorScheme() === 'dark';
   const { currentMonth, rangeStart, rangeEnd } = useShiftStore();
+  const {
+    firstDayOfWeek,
+    showWeekNumbers,
+    highlightWeekends,
+    todayHighlightStyle,
+    showHolidays,
+    calendarDensity,
+    fontSizeScale,
+  } = useSettingsStore();
 
-  const weeks = generateWeeks(currentMonth);
+  const fontMultiplier = fontSizeScale === 'small' ? 0.88 : fontSizeScale === 'large' ? 1.18 : 1.0;
+  const cellMinHeight = calendarDensity === 'compact' ? 72 : 96;
+
+  const weekdayNames = firstDayOfWeek === 'sunday' ? WEEKDAY_NAMES_CS_SUN : WEEKDAY_NAMES_CS_MON;
+  const weeks = useMemo(
+    () => generateWeeks(currentMonth, firstDayOfWeek, showHolidays),
+    [currentMonth, firstDayOfWeek, showHolidays]
+  );
 
   const hasRange = isEditMode && !!rangeStart;
   const minDate = hasRange ? (rangeStart < (rangeEnd || rangeStart) ? rangeStart : (rangeEnd || rangeStart)) : '';
@@ -67,13 +88,19 @@ export default function CalendarGrid({
     const { pageX: gX, pageY: gY, width, height } = layoutRef.current;
     if (width <= 0 || height <= 0 || weeks.length === 0) return null;
 
+    const weekColWidth = showWeekNumbers ? 24 : 0;
+    const effectiveWidth = Math.max(1, width - weekColWidth);
+
     const relX = Math.max(0, Math.min(width - 1, pageX - gX));
     const relY = Math.max(0, Math.min(height - 1, pageY - gY));
 
-    const colWidth = width / 7;
+    if (relX < weekColWidth) return null; // over week number column
+
+    const relXInGrid = relX - weekColWidth;
+    const colWidth = effectiveWidth / 7;
     const rowHeight = height / weeks.length;
 
-    const col = Math.max(0, Math.min(6, Math.floor(relX / colWidth)));
+    const col = Math.max(0, Math.min(6, Math.floor(relXInGrid / colWidth)));
     const row = Math.max(0, Math.min(weeks.length - 1, Math.floor(relY / rowHeight)));
 
     const day = weeks[row]?.[col];
@@ -162,16 +189,24 @@ export default function CalendarGrid({
   return (
     <View style={styles.outerContainer}>
       <View style={[styles.calendarCard, { backgroundColor: ui.cardBg, borderColor: ui.cardBorder }]}>
-        {/* 1. Weekday Header Row (Po - Ne) */}
+        {/* 1. Weekday Header Row (Po - Ne or Ne - So, plus optional week numbers column) */}
         <View style={[styles.weekdayHeaderRow, { backgroundColor: ui.headerBg, borderBottomColor: ui.cardBorder }]}>
-          {WEEKDAY_NAMES_CS.map((name, index) => {
-            const isWeekend = index === 5 || index === 6;
+          {showWeekNumbers && (
+            <View style={[styles.weekNumberHeaderCell, { borderRightColor: ui.cardBorder }]}>
+              <Text style={[styles.weekNumberHeaderText, { color: ui.textMuted }]}>#</Text>
+            </View>
+          )}
+          {weekdayNames.map((name, index) => {
+            const isWeekend = firstDayOfWeek === 'sunday' ? (index === 0 || index === 6) : (index === 5 || index === 6);
             return (
               <View key={name} style={styles.weekdayCell}>
                 <Text
                   style={[
                     styles.weekdayText,
-                    { color: isWeekend ? ui.weekendText : ui.textMuted },
+                    {
+                      color: (isWeekend && highlightWeekends) ? ui.weekendText : ui.textMuted,
+                      fontSize: Math.round(13 * fontMultiplier),
+                    },
                   ]}
                 >
                   {name}
@@ -188,101 +223,180 @@ export default function CalendarGrid({
           onLayout={updateContainerMeasure}
           {...(isEditMode ? panResponder.panHandlers : {})}
         >
-          {weeks.map((week, weekIndex) => (
-            <View key={`week_${weekIndex}`} style={styles.weekRow}>
-              {week.map((day, dayIndex) => {
-                const isSelected = hasRange
-                  ? day.dateStr >= minDate && day.dateStr <= maxDate
-                  : isDateSelected ? isDateSelected(day.dateStr) : false;
+          {weeks.map((week, weekIndex) => {
+            const midDay = week[3] || week[0];
+            const [y, m, d] = midDay.dateStr.split('-').map(Number);
+            const isoWeekNum = getIsoWeekNumber(new Date(y, m - 1, d));
+            const isLastRow = weekIndex === weeks.length - 1;
 
-                const isStart = hasRange && day.dateStr === minDate;
-                const isEnd = hasRange && day.dateStr === maxDate;
-                const isRangeMiddle = isSelected && !isStart && !isEnd;
-                const isFirstCol = dayIndex === 0;
-                const isLastCol = dayIndex === 6;
-                const isLastRow = weekIndex === weeks.length - 1;
-
-                return (
-                  <TouchableOpacity
-                    key={day.dateStr}
-                    disabled={!day.isCurrentMonth}
+            return (
+              <View key={`week_${weekIndex}`} style={styles.weekRow}>
+                {showWeekNumbers && (
+                  <View
                     style={[
-                      styles.dayCell,
+                      styles.weekNumberCell,
                       {
-                        borderRightColor: (isSelected && !isEnd && !isLastCol)
-                          ? 'transparent'
-                          : (isLastCol ? 'transparent' : ui.cellBorder),
+                        borderRightColor: ui.cellBorder,
                         borderBottomColor: isLastRow ? 'transparent' : ui.cellBorder,
-                        backgroundColor: day.isWeekend && !isSelected ? ui.weekendBg : 'transparent',
-                        opacity: day.isCurrentMonth ? 1 : 0.28,
+                        backgroundColor: isDark ? 'rgba(255,255,255,0.02)' : 'rgba(0,0,0,0.02)',
                       },
                     ]}
-                    activeOpacity={0.7}
-                    onPress={() => {
-                      if (!day.isCurrentMonth) return;
-                      if (isEditMode) {
-                        onDayTapInEditMode?.(day);
-                      } else {
-                        onDayPress?.(day);
-                      }
-                    }}
-                    onLongPress={() => {
-                      if (!day.isCurrentMonth) return;
-                      onDayLongPress?.(day);
-                    }}
                   >
-                    {/* Modern fluid ribbon background behind selected cells */}
-                    {isSelected && (
-                      <View
-                        style={[
-                          styles.selectionRibbon,
-                          {
-                            backgroundColor: ui.selectedBg,
-                            left: isStart || isFirstCol ? 2 : -1,
-                            right: isEnd || isLastCol ? 2 : -1,
-                            borderTopLeftRadius: isStart || isFirstCol ? 14 : 0,
-                            borderBottomLeftRadius: isStart || isFirstCol ? 14 : 0,
-                            borderTopRightRadius: isEnd || isLastCol ? 14 : 0,
-                            borderBottomRightRadius: isEnd || isLastCol ? 14 : 0,
-                          },
-                        ]}
-                      />
-                    )}
+                    <Text
+                      style={[
+                        styles.weekNumberText,
+                        { color: ui.textMuted, fontSize: Math.round(10 * fontMultiplier) },
+                      ]}
+                    >
+                      {isoWeekNum}
+                    </Text>
+                  </View>
+                )}
+                {week.map((day, dayIndex) => {
+                  const isSelected = hasRange
+                    ? day.dateStr >= minDate && day.dateStr <= maxDate
+                    : isDateSelected ? isDateSelected(day.dateStr) : false;
 
-                    {/* Day Number Header */}
-                    <View style={styles.dayNumberRow}>
-                      {isStart || isEnd ? (
-                        <View style={[styles.selectedDayBadge, { backgroundColor: ui.accent }]}>
-                          <Text style={styles.selectedDayBadgeText}>
-                            {day.dayNumber}
-                          </Text>
-                        </View>
-                      ) : day.isToday ? (
-                        <View style={[styles.todayCircle, { backgroundColor: ui.todayBg }]}>
-                          <Text style={[styles.dayNumberText, { color: ui.todayText }]}>
-                            {day.dayNumber}
-                          </Text>
-                        </View>
-                      ) : (
-                        <Text
+                  const isStart = hasRange && day.dateStr === minDate;
+                  const isEnd = hasRange && day.dateStr === maxDate;
+                  const isRangeMiddle = isSelected && !isStart && !isEnd;
+                  const isFirstCol = dayIndex === 0;
+                  const isLastCol = dayIndex === 6;
+                  const isWeekendDay = day.isWeekend && highlightWeekends;
+                  const hasHoliday = Boolean(day.holidayName && showHolidays);
+
+                  return (
+                    <TouchableOpacity
+                      key={day.dateStr}
+                      disabled={!day.isCurrentMonth}
+                      style={[
+                        styles.dayCell,
+                        {
+                          minHeight: cellMinHeight,
+                          borderRightColor: (isSelected && !isEnd && !isLastCol)
+                            ? 'transparent'
+                            : (isLastCol ? 'transparent' : ui.cellBorder),
+                          borderBottomColor: isLastRow ? 'transparent' : ui.cellBorder,
+                          backgroundColor: (isWeekendDay && !isSelected) ? ui.weekendBg : 'transparent',
+                          opacity: day.isCurrentMonth ? 1 : 0.28,
+                        },
+                      ]}
+                      activeOpacity={0.7}
+                      onPress={() => {
+                        if (!day.isCurrentMonth) return;
+                        if (isEditMode) {
+                          onDayTapInEditMode?.(day);
+                        } else {
+                          onDayPress?.(day);
+                        }
+                      }}
+                      onLongPress={() => {
+                        if (!day.isCurrentMonth) return;
+                        onDayLongPress?.(day);
+                      }}
+                    >
+                      {/* Optional custom background (e.g. full-fill or 50/50 split) */}
+                      {renderCellBg && renderCellBg(day)}
+
+                      {/* Modern fluid ribbon background behind selected cells */}
+                      {isSelected && (
+                        <View
                           style={[
-                            styles.dayNumberText,
+                            styles.selectionRibbon,
                             {
-                              color: isRangeMiddle
-                                ? ui.accent
-                                : day.isWeekend
-                                ? ui.weekendText
-                                : ui.text,
-                              fontWeight: isRangeMiddle ? '800' : '700',
+                              backgroundColor: ui.selectedBg,
+                              left: isStart || isFirstCol ? 2 : -1,
+                              right: isEnd || isLastCol ? 2 : -1,
+                              borderTopLeftRadius: isStart || isFirstCol ? 14 : 0,
+                              borderBottomLeftRadius: isStart || isFirstCol ? 14 : 0,
+                              borderTopRightRadius: isEnd || isLastCol ? 14 : 0,
+                              borderBottomRightRadius: isEnd || isLastCol ? 14 : 0,
                             },
                           ]}
-                        >
-                          {day.dayNumber}
-                        </Text>
+                        />
                       )}
-                    </View>
 
-                    {/* Shift Content Slot */}
+                      {/* Day Number Header */}
+                      <View style={styles.dayNumberRow}>
+                        {isStart || isEnd ? (
+                          <View style={[styles.selectedDayBadge, { backgroundColor: ui.accent }]}>
+                            <Text style={[styles.selectedDayBadgeText, { fontSize: Math.round(14 * fontMultiplier) }]}>
+                              {day.dayNumber}
+                            </Text>
+                          </View>
+                        ) : day.isToday ? (
+                          todayHighlightStyle === 'badge' ? (
+                            <View style={[styles.todayCircle, { backgroundColor: ui.todayBg }]}>
+                              <Text style={[styles.dayNumberText, { color: ui.todayText, fontSize: Math.round(14.5 * fontMultiplier) }]}>
+                                {day.dayNumber}
+                              </Text>
+                            </View>
+                          ) : todayHighlightStyle === 'border' ? (
+                            <View style={[styles.todayBorderBox, { borderColor: ui.todayBg }]}>
+                              <Text style={[styles.dayNumberText, { color: ui.todayBg, fontWeight: '900', fontSize: Math.round(14.5 * fontMultiplier) }]}>
+                                {day.dayNumber}
+                              </Text>
+                            </View>
+                          ) : todayHighlightStyle === 'dot' ? (
+                            <View style={styles.todayDotContainer}>
+                              <Text style={[styles.dayNumberText, { color: ui.todayBg, fontWeight: '900', fontSize: Math.round(14.5 * fontMultiplier) }]}>
+                                {day.dayNumber}
+                              </Text>
+                              <View style={[styles.todaySmallDot, { backgroundColor: ui.todayBg }]} />
+                            </View>
+                          ) : (
+                            <View style={[styles.todaySubtleBox, { backgroundColor: `${ui.todayBg}25` }]}>
+                              <Text style={[styles.dayNumberText, { color: ui.todayBg, fontWeight: '900', fontSize: Math.round(14.5 * fontMultiplier) }]}>
+                                {day.dayNumber}
+                              </Text>
+                            </View>
+                          )
+                        ) : hasHoliday ? (
+                          <View style={styles.holidayNumberRow}>
+                            <Text
+                              style={[
+                                styles.dayNumberText,
+                                {
+                                  color: isDark ? '#F87171' : '#DC2626',
+                                  fontWeight: '800',
+                                  fontSize: Math.round(14.5 * fontMultiplier),
+                                },
+                              ]}
+                            >
+                              {day.dayNumber}
+                            </Text>
+                            <View style={[styles.holidayDot, { backgroundColor: isDark ? '#F87171' : '#DC2626' }]} />
+                          </View>
+                        ) : (
+                          <Text
+                            style={[
+                              styles.dayNumberText,
+                              {
+                                color: isRangeMiddle
+                                  ? ui.accent
+                                  : isWeekendDay
+                                  ? ui.weekendText
+                                  : ui.text,
+                                fontWeight: isRangeMiddle ? '800' : '700',
+                                fontSize: Math.round(14.5 * fontMultiplier),
+                              },
+                            ]}
+                          >
+                            {day.dayNumber}
+                          </Text>
+                        )}
+                      </View>
+
+                      {/* Holiday Badge (e.g. 🇨🇿 Den české státnosti) */}
+                      {hasHoliday && day.isCurrentMonth && (
+                        <View style={[styles.holidayBadge, { backgroundColor: isDark ? 'rgba(239, 68, 68, 0.18)' : '#FEE2E2' }]}>
+                          <Text style={[styles.holidayBadgeText, { color: isDark ? '#FCA5A5' : '#DC2626' }]} numberOfLines={1}>
+                            🇨🇿 {day.holidayName}
+                          </Text>
+                        </View>
+                      )}
+
+                      {/* Shift Content Slot */}
                     <View style={styles.shiftSlot}>
                       {renderCellContent && renderCellContent(day)}
                     </View>
@@ -290,7 +404,8 @@ export default function CalendarGrid({
                 );
               })}
             </View>
-          ))}
+          );
+        })}
         </View>
       </View>
     </View>
@@ -340,10 +455,11 @@ const styles = StyleSheet.create({
     minHeight: 96,
     borderRightWidth: 1,
     borderBottomWidth: 1,
-    paddingHorizontal: 2.5,
-    paddingTop: 5,
-    paddingBottom: 5,
+    paddingHorizontal: 1.5,
+    paddingTop: 4,
+    paddingBottom: 4,
     justifyContent: 'flex-start',
+    overflow: 'hidden',
   },
   dayNumberRow: {
     alignItems: 'center',
@@ -397,5 +513,78 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 14,
     fontWeight: '800',
+  },
+  // Week numbers column (Step 7.4B)
+  weekNumberHeaderCell: {
+    width: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRightWidth: 1,
+  },
+  weekNumberHeaderText: {
+    fontSize: 10,
+    fontWeight: '800',
+  },
+  weekNumberCell: {
+    width: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRightWidth: 1,
+  },
+  weekNumberText: {
+    fontSize: 10,
+    fontWeight: '800',
+  },
+  // Today highlight variants (Step 7.4B)
+  todayBorderBox: {
+    minWidth: 23,
+    height: 23,
+    borderRadius: 6,
+    borderWidth: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 2,
+  },
+  todayDotContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  todaySmallDot: {
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+    marginTop: 1,
+  },
+  todaySubtleBox: {
+    minWidth: 23,
+    height: 23,
+    borderRadius: 11.5,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 3,
+  },
+  // Czech Holidays (Step 7.4B)
+  holidayNumberRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+  },
+  holidayDot: {
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+  },
+  holidayBadge: {
+    borderRadius: 3,
+    paddingHorizontal: 2,
+    paddingVertical: 1,
+    marginBottom: 2,
+    width: '100%',
+    alignItems: 'center',
+  },
+  holidayBadgeText: {
+    fontSize: 7,
+    fontWeight: '800',
+    textAlign: 'center',
   },
 });

@@ -9,8 +9,9 @@ import {
   TextInput,
   ActivityIndicator,
   Alert,
-  useColorScheme,
+  Switch,
 } from 'react-native';
+import { useColorScheme } from '@/hooks/use-color-scheme';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   X,
@@ -23,6 +24,8 @@ import {
   Crown,
   Sparkles,
   FileText,
+  User,
+  Users,
 } from 'lucide-react-native';
 import { useShiftStore } from '@/store/useShiftStore';
 import { useAuthStore } from '@/store/useAuthStore';
@@ -80,6 +83,8 @@ export default function ShiftPickerModal({
   const [newEnd, setNewEnd] = useState('18:00');
   const [newHours, setNewHours] = useState('12');
   const [newColor, setNewColor] = useState<string>(PaletteColors[0].hex);
+  const [newHasSpecificTime, setNewHasSpecificTime] = useState(false);
+  const [newIsPersonal, setNewIsPersonal] = useState(true);
   const [creating, setCreating] = useState(false);
 
   const [noteText, setNoteText] = useState('');
@@ -92,6 +97,9 @@ export default function ShiftPickerModal({
 
   const activeUserId = editingUserId || currentUser?.id;
   const activeMember = groupMembers.find((m) => m.id === activeUserId) || currentUser;
+
+  // Filter: show shared presets (user_id is null) + personal presets of this active member
+  const visiblePresets = presets.filter((p) => !p.user_id || p.user_id === activeUserId);
 
   const ui = {
     bg: isDark ? '#090D16' : '#F8FAFC',
@@ -120,13 +128,13 @@ export default function ShiftPickerModal({
     try {
       const created = await createCustomPreset({
         groupId: currentGroup.id,
-        userId: currentUser?.id,
+        userId: newIsPersonal ? (activeUserId || null) : null,
         title: newTitle.trim(),
-        startTime: newStart.trim() || null,
-        endTime: newEnd.trim() || null,
+        startTime: newHasSpecificTime ? newStart.trim() || null : null,
+        endTime: newHasSpecificTime ? newEnd.trim() || null : null,
         color: newColor,
         shortCode: newTitle.trim().slice(0, 3).toUpperCase(),
-        hours: parseFloat(newHours) || 8.0,
+        hours: parseFloat(newHours) || 0,
       });
 
       setPresets([...presets, created]);
@@ -240,7 +248,7 @@ export default function ShiftPickerModal({
           <Text style={[styles.sectionHeading, { color: ui.textMuted }]}>DOSTUPNÉ SMĚNY</Text>
 
           <View style={styles.presetsList}>
-            {presets.map((preset) => {
+            {visiblePresets.map((preset) => {
               const bg = preset.color;
 
               return (
@@ -259,9 +267,45 @@ export default function ShiftPickerModal({
                   <View style={[styles.cardColorBar, { backgroundColor: bg }]} />
 
                   <View style={styles.cardContent}>
-                    <Text style={[styles.cardTitle, { color: ui.text }]}>
-                      {preset.title}
-                    </Text>
+                    <View style={styles.presetTitleRow}>
+                      <Text style={[styles.cardTitle, { color: ui.text }]}>
+                        {preset.title}
+                      </Text>
+                      {preset.user_id ? (
+                        <View
+                          style={[
+                            styles.scopeTag,
+                            {
+                              backgroundColor: isDark ? 'rgba(59, 130, 246, 0.2)' : '#EFF6FF',
+                              borderColor: isDark ? 'rgba(59, 130, 246, 0.4)' : '#BFDBFE',
+                            },
+                          ]}
+                        >
+                          <User size={10} color={ui.accent} />
+                          <Text style={[styles.scopeTagText, { color: ui.accent }]}>
+                            {preset.user_id === currentUser?.id
+                              ? 'Moje'
+                              : (groupMembers.find((m) => m.id === preset.user_id)?.display_name || 'Osobní')}
+                          </Text>
+                        </View>
+                      ) : (
+                        <View
+                          style={[
+                            styles.scopeTag,
+                            {
+                              backgroundColor: isDark ? 'rgba(16, 185, 129, 0.15)' : '#ECFDF5',
+                              borderColor: isDark ? 'rgba(16, 185, 129, 0.3)' : '#A7F3D0',
+                            },
+                          ]}
+                        >
+                          <Users size={10} color="#10B981" />
+                          <Text style={[styles.scopeTagText, { color: '#10B981' }]}>
+                            Rodinná
+                          </Text>
+                        </View>
+                      )}
+                    </View>
+
                     {preset.start_time && preset.end_time ? (
                       <View style={styles.cardTimeRow}>
                         <Clock size={12} color={ui.textMuted} />
@@ -269,18 +313,16 @@ export default function ShiftPickerModal({
                           {preset.start_time} – {preset.end_time}
                         </Text>
                       </View>
-                    ) : (
-                      <Text style={[styles.cardTimeText, { color: ui.textMuted }]}>
-                        Celodenní / flexibilní
-                      </Text>
-                    )}
+                    ) : null}
                   </View>
 
-                  <View style={[styles.hoursPill, { backgroundColor: `${bg}25`, borderColor: `${bg}60` }]}>
-                    <Text style={[styles.hoursPillText, { color: bg }]}>
-                      {preset.hours}h
-                    </Text>
-                  </View>
+                  {preset.hours !== undefined && preset.hours !== null && preset.hours > 0 ? (
+                    <View style={[styles.hoursPill, { backgroundColor: `${bg}25`, borderColor: `${bg}60` }]}>
+                      <Text style={[styles.hoursPillText, { color: bg }]}>
+                        {preset.hours}h
+                      </Text>
+                    </View>
+                  ) : null}
                 </TouchableOpacity>
               );
             })}
@@ -326,7 +368,7 @@ export default function ShiftPickerModal({
             <View style={styles.addCustomTextBox}>
               <Text style={[styles.addCustomTitle, { color: ui.text }]}>Vytvořit novou směnu</Text>
               <Text style={[styles.addCustomSubtitle, { color: ui.textMuted }]}>
-                Vlastní název, časy a barva pro celou rodinu
+                Vlastní název, časy a barva (pro vás nebo pro rodinu)
               </Text>
             </View>
           </TouchableOpacity>
@@ -371,48 +413,122 @@ export default function ShiftPickerModal({
                 </View>
               </View>
 
-              {/* Times Row */}
-              <View style={styles.timesRow}>
-                <View style={[styles.inputGroup, { flex: 1 }]}>
-                  <Text style={[styles.fieldLabel, { color: ui.textMuted }]}>Začátek</Text>
-                  <View style={[styles.inputBox, { backgroundColor: ui.inputBg, borderColor: ui.border }]}>
-                    <Clock size={15} color={ui.textMuted} />
-                    <TextInput
-                      style={[styles.inputField, { color: ui.text }]}
-                      placeholder="06:00"
-                      placeholderTextColor={ui.textMuted}
-                      value={newStart}
-                      onChangeText={setNewStart}
-                    />
+              {/* Toggle: Nastavit čas směny (od - do) */}
+              <View style={[styles.switchCard, { backgroundColor: ui.inputBg, borderColor: ui.border }]}>
+                <View style={{ flex: 1, gap: 2 }}>
+                  <Text style={[styles.switchTitle, { color: ui.text }]}>
+                    Nastavit čas směny
+                  </Text>
+                  <Text style={[styles.switchSubtitle, { color: ui.textMuted }]}>
+                    {newHasSpecificTime ? 'Směna má zadaný přesný čas a hodiny' : 'Bez časů a bez hodin (pouze název a barva)'}
+                  </Text>
+                </View>
+                <Switch
+                  value={newHasSpecificTime}
+                  onValueChange={setNewHasSpecificTime}
+                  trackColor={{ false: isDark ? '#334155' : '#CBD5E1', true: ui.accent }}
+                  thumbColor="#FFFFFF"
+                />
+              </View>
+
+              {newHasSpecificTime && (
+                /* Times Row */
+                <View style={styles.timesRow}>
+                  <View style={[styles.inputGroup, { flex: 1 }]}>
+                    <Text style={[styles.fieldLabel, { color: ui.textMuted }]}>Začátek</Text>
+                    <View style={[styles.inputBox, { backgroundColor: ui.inputBg, borderColor: ui.border }]}>
+                      <Clock size={15} color={ui.textMuted} />
+                      <TextInput
+                        style={[styles.inputField, { color: ui.text }]}
+                        placeholder="06:00"
+                        placeholderTextColor={ui.textMuted}
+                        value={newStart}
+                        onChangeText={setNewStart}
+                      />
+                    </View>
+                  </View>
+
+                  <View style={[styles.inputGroup, { flex: 1 }]}>
+                    <Text style={[styles.fieldLabel, { color: ui.textMuted }]}>Konec</Text>
+                    <View style={[styles.inputBox, { backgroundColor: ui.inputBg, borderColor: ui.border }]}>
+                      <Clock size={15} color={ui.textMuted} />
+                      <TextInput
+                        style={[styles.inputField, { color: ui.text }]}
+                        placeholder="18:00"
+                        placeholderTextColor={ui.textMuted}
+                        value={newEnd}
+                        onChangeText={setNewEnd}
+                      />
+                    </View>
+                  </View>
+
+                  <View style={[styles.inputGroup, { width: 75 }]}>
+                    <Text style={[styles.fieldLabel, { color: ui.textMuted }]}>Hodin</Text>
+                    <View style={[styles.inputBox, { backgroundColor: ui.inputBg, borderColor: ui.border }]}>
+                      <TextInput
+                        style={[styles.inputField, { color: ui.text, textAlign: 'center' }]}
+                        placeholder="12"
+                        placeholderTextColor={ui.textMuted}
+                        value={newHours}
+                        onChangeText={setNewHours}
+                        keyboardType="numeric"
+                      />
+                    </View>
                   </View>
                 </View>
+              )}
 
-                <View style={[styles.inputGroup, { flex: 1 }]}>
-                  <Text style={[styles.fieldLabel, { color: ui.textMuted }]}>Konec</Text>
-                  <View style={[styles.inputBox, { backgroundColor: ui.inputBg, borderColor: ui.border }]}>
-                    <Clock size={15} color={ui.textMuted} />
-                    <TextInput
-                      style={[styles.inputField, { color: ui.text }]}
-                      placeholder="18:00"
-                      placeholderTextColor={ui.textMuted}
-                      value={newEnd}
-                      onChangeText={setNewEnd}
-                    />
-                  </View>
-                </View>
+              {/* Selector: Viditelnost předvolby (Osobní vs Celá rodina) */}
+              <View style={styles.inputGroup}>
+                <Text style={[styles.fieldLabel, { color: ui.textMuted }]}>Komu směnu zobrazit</Text>
+                <View style={styles.scopeSelectorRow}>
+                  <TouchableOpacity
+                    style={[
+                      styles.scopeOptionBtn,
+                      newIsPersonal && styles.scopeOptionActive,
+                      {
+                        backgroundColor: newIsPersonal ? (isDark ? 'rgba(59, 130, 246, 0.2)' : '#EFF6FF') : ui.inputBg,
+                        borderColor: newIsPersonal ? ui.accent : ui.border,
+                      },
+                    ]}
+                    onPress={() => setNewIsPersonal(true)}
+                    activeOpacity={0.7}
+                  >
+                    <User size={15} color={newIsPersonal ? ui.accent : ui.textMuted} />
+                    <Text
+                      style={[
+                        styles.scopeOptionText,
+                        { color: newIsPersonal ? ui.accent : ui.text },
+                      ]}
+                      numberOfLines={1}
+                    >
+                      Pouze {activeMember?.display_name || 'pro mě'}
+                    </Text>
+                  </TouchableOpacity>
 
-                <View style={[styles.inputGroup, { width: 75 }]}>
-                  <Text style={[styles.fieldLabel, { color: ui.textMuted }]}>Hodin</Text>
-                  <View style={[styles.inputBox, { backgroundColor: ui.inputBg, borderColor: ui.border }]}>
-                    <TextInput
-                      style={[styles.inputField, { color: ui.text, textAlign: 'center' }]}
-                      placeholder="12"
-                      placeholderTextColor={ui.textMuted}
-                      value={newHours}
-                      onChangeText={setNewHours}
-                      keyboardType="numeric"
-                    />
-                  </View>
+                  <TouchableOpacity
+                    style={[
+                      styles.scopeOptionBtn,
+                      !newIsPersonal && styles.scopeOptionActive,
+                      {
+                        backgroundColor: !newIsPersonal ? (isDark ? 'rgba(16, 185, 129, 0.2)' : '#ECFDF5') : ui.inputBg,
+                        borderColor: !newIsPersonal ? '#10B981' : ui.border,
+                      },
+                    ]}
+                    onPress={() => setNewIsPersonal(false)}
+                    activeOpacity={0.7}
+                  >
+                    <Users size={15} color={!newIsPersonal ? '#10B981' : ui.textMuted} />
+                    <Text
+                      style={[
+                        styles.scopeOptionText,
+                        { color: !newIsPersonal ? '#10B981' : ui.text },
+                      ]}
+                      numberOfLines={1}
+                    >
+                      Celá rodina
+                    </Text>
+                  </TouchableOpacity>
                 </View>
               </View>
 
@@ -753,6 +869,23 @@ const styles = StyleSheet.create({
     fontSize: 14.5,
     fontWeight: '600',
   },
+  switchCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 12,
+    borderRadius: 14,
+    borderWidth: 1,
+    gap: 12,
+  },
+  switchTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  switchSubtitle: {
+    fontSize: 11.5,
+    fontWeight: '500',
+  },
   timesRow: {
     flexDirection: 'row',
     gap: 8,
@@ -760,13 +893,13 @@ const styles = StyleSheet.create({
   colorsGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 10,
+    gap: 8,
     marginTop: 2,
   },
   colorCircle: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
+    width: 30,
+    height: 30,
+    borderRadius: 15,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -785,6 +918,44 @@ const styles = StyleSheet.create({
   submodalSubmitText: {
     color: '#FFFFFF',
     fontSize: 15,
+    fontWeight: '700',
+  },
+  presetTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  scopeTag: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 6,
+    borderWidth: 1,
+  },
+  scopeTagText: {
+    fontSize: 10.5,
+    fontWeight: '700',
+  },
+  scopeSelectorRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  scopeOptionBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+    borderRadius: 12,
+    borderWidth: 1.5,
+  },
+  scopeOptionActive: {},
+  scopeOptionText: {
+    fontSize: 12,
     fontWeight: '700',
   },
 });

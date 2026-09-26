@@ -6,7 +6,54 @@ const dbUrl = process.env.EXPO_PUBLIC_NEON_DATABASE_URL || 'postgresql://neondb_
 // Initialize Neon HTTP query function (serverless, no persistent TCP connection required)
 export const sql: NeonQueryFunction<false, false> = neon(dbUrl);
 
-// Database Interfaces
+// ─── Member Permissions ───────────────────────────────────────────────────────
+
+/**
+ * Granular permission flags stored as JSONB on each user row.
+ * Admins bypass all checks and always have full access.
+ */
+export interface MemberPermissions {
+  /** Can open and view the calendar */
+  canViewCalendar: boolean;
+  /** Can write and delete their own shifts */
+  canEditOwnShifts: boolean;
+  /** Can write and delete shifts for any family member */
+  canEditAllShifts: boolean;
+  /** Can add and delete day notes */
+  canAddNotes: boolean;
+  /** Can create, edit and delete shift presets */
+  canManagePresets: boolean;
+}
+
+/** Default permissions granted to a newly joined / approved member. */
+export const DEFAULT_MEMBER_PERMISSIONS: MemberPermissions = {
+  canViewCalendar: true,
+  canEditOwnShifts: true,
+  canEditAllShifts: false,
+  canAddNotes: true,
+  canManagePresets: false,
+};
+
+/** Full permissions granted to admins (and optionally elevated members). */
+export const FULL_PERMISSIONS: MemberPermissions = {
+  canViewCalendar: true,
+  canEditOwnShifts: true,
+  canEditAllShifts: true,
+  canAddNotes: true,
+  canManagePresets: true,
+};
+
+/**
+ * Returns the effective permissions for a user.
+ * Admins always get FULL_PERMISSIONS regardless of stored value.
+ */
+export function getEffectivePermissions(user: DbUser): MemberPermissions {
+  if (user.role === 'admin') return FULL_PERMISSIONS;
+  return user.permissions ?? DEFAULT_MEMBER_PERMISSIONS;
+}
+
+// ─── Database Interfaces ──────────────────────────────────────────────────────
+
 export interface DbGroup {
   id: string;
   name: string;
@@ -25,6 +72,8 @@ export interface DbUser {
   role: 'admin' | 'member';
   status: 'active' | 'pending' | 'rejected';
   password_hash: string;
+  /** Granular permission flags (JSONB). Null = use DEFAULT_MEMBER_PERMISSIONS. Admins bypass. */
+  permissions: MemberPermissions | null;
   created_at: string;
 }
 

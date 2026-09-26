@@ -166,3 +166,32 @@ export async function deletePreset(presetId: string): Promise<boolean> {
   `;
   return result && result.length > 0;
 }
+
+/**
+ * Updates an existing shift preset (title, times, hours, color, shortCode).
+ */
+export async function updatePreset(params: {
+  presetId: string;
+  userId?: string | null;
+  title: string;
+  startTime?: string | null;
+  endTime?: string | null;
+  color: string;
+  shortCode?: string | null;
+  hours?: number;
+}): Promise<DbShiftPreset> {
+  const result = await sql`
+    UPDATE shift_presets
+    SET title = ${params.title},
+        user_id = ${params.userId !== undefined ? params.userId : null},
+        start_time = ${params.startTime || null},
+        end_time = ${params.endTime || null},
+        color = ${params.color},
+        short_code = ${params.shortCode || null},
+        hours = ${params.hours ?? 8.0}
+    WHERE id = ${params.presetId}
+    RETURNING *;
+  `;
+  return result[0] as DbShiftPreset;
+}
+

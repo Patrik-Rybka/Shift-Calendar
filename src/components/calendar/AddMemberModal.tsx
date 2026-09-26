@@ -8,10 +8,10 @@ import {
   Modal,
   ActivityIndicator,
   Alert,
-  useColorScheme,
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
+import { useColorScheme } from '@/hooks/use-color-scheme';
 import { X, UserPlus, Sparkles, Check, Heart } from 'lucide-react-native';
 import { MemberColors } from '@/constants/theme';
 import { addVirtualFamilyMember } from '@/services/db/groupService';

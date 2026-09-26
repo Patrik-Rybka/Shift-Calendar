@@ -5,8 +5,8 @@ import {
   TouchableOpacity,
   StyleSheet,
   ActivityIndicator,
-  useColorScheme,
 } from 'react-native';
+import { useColorScheme } from '@/hooks/use-color-scheme';
 import * as Clipboard from 'expo-clipboard';
 import { useRouter } from 'expo-router';
 import {
@@ -22,6 +22,7 @@ import {
 } from 'lucide-react-native';
 import { useShiftStore } from '@/store/useShiftStore';
 import { useAuthStore } from '@/store/useAuthStore';
+import { useSettingsStore } from '@/store/useSettingsStore';
 
 const CZECH_MONTHS = [
   'Leden',
@@ -47,6 +48,7 @@ export default function CalendarHeader({ onSave }: CalendarHeaderProps) {
   const isDark = useColorScheme() === 'dark';
 
   const { currentGroup, currentUser } = useAuthStore();
+  const { defaultEditMemberMode } = useSettingsStore();
   const {
     currentMonth,
     nextMonth,
@@ -106,7 +108,9 @@ export default function CalendarHeader({ onSave }: CalendarHeaderProps) {
         setEditMode(false);
       }
     } else {
-      if (!editingUserId && currentUser) {
+      if (defaultEditMemberMode === 'always_me' && currentUser) {
+        setEditingUserId(currentUser.id);
+      } else if (!editingUserId && currentUser) {
         setEditingUserId(currentUser.id);
       }
       setEditMode(true);
