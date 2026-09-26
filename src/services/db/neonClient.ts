@@ -1,60 +1,12 @@
 import { neon, type NeonQueryFunction } from '@neondatabase/serverless';
 
-// Base64 encoded fallback connection string to ensure APK runs seamlessly even if CI environment secrets are omitted
-const FALLBACK_ENC =
-  'cG9zdGdyZXNxbDovL25lb25kYl9vd25lcjpucGdfZnVZVDYxR3RzY2taQGVwLXJvdW5kLWJsb2NrLWIxNjlhbDM1LXBvb2xlci5jLTUuZXUtY2VudHJhbC0xLmF3cy5uZW9uLnRlY2gvbmVvbmRiP3NzbG1vZGU9cmVxdWlyZQ==';
+const DEFAULT_DB_URL =
+  'postgresql://neondb_owner:npg_fuYT61GtsckZ@ep-round-block-b169al35-pooler.c-5.eu-central-1.aws.neon.tech/neondb?sslmode=require';
 
-function getFallbackUrl(): string {
-  try {
-    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=';
-    let output = '';
-    const str = String(FALLBACK_ENC).replace(/=+$/, '');
-    for (
-      let bc = 0, bs = 0, buffer: number, idx = 0;
-      (buffer = str.charCodeAt(idx++));
-      ~buffer && ((bs = bc % 4 ? bs * 64 + buffer : buffer), bc++ % 4)
-        ? (output += String.fromCharCode(255 & (bs >> ((-2 * bc) & 6))))
-        : 0
-    ) {
-      buffer = chars.indexOf(String.fromCharCode(buffer));
-    }
-    return output;
-  } catch {
-    return '';
-  }
-}
-
-// Retrieve database URL from Expo environment variable, or use fallback
-function getEffectiveDbUrl(): string {
-  const envUrl = process.env.EXPO_PUBLIC_NEON_DATABASE_URL;
-  if (envUrl && envUrl.trim().length > 0) {
-    return envUrl.trim();
-  }
-  return getFallbackUrl();
-}
-
-// Lazy initialization so top-level bundle evaluation never crashes Android activity
-let _neonClient: NeonQueryFunction<false, false> | null = null;
-
-function getNeonClient(): NeonQueryFunction<false, false> {
-  if (!_neonClient) {
-    const url = getEffectiveDbUrl();
-    if (!url) {
-      console.warn('Upozornění: Chybí připojení k databázi.');
-      return (async () => {
-        throw new Error('Chybí připojení k databázi (EXPO_PUBLIC_NEON_DATABASE_URL).');
-      }) as any;
-    }
-    _neonClient = neon(url);
-  }
-  return _neonClient;
-}
+const dbUrl = (process.env.EXPO_PUBLIC_NEON_DATABASE_URL || DEFAULT_DB_URL).trim();
 
 // Initialize Neon HTTP query function (serverless, no persistent TCP connection required)
-export const sql: NeonQueryFunction<false, false> = ((strings: any, ...values: any[]) => {
-  const client = getNeonClient();
-  return client(strings, ...values);
-}) as NeonQueryFunction<false, false>;
+export const sql: NeonQueryFunction<false, false> = neon(dbUrl);
 
 // ─── Member Permissions ───────────────────────────────────────────────────────
 

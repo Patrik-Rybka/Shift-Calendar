@@ -41,12 +41,7 @@ import EditToolbar from '@/components/calendar/EditToolbar';
 import ShiftPickerModal from '@/components/calendar/ShiftPickerModal';
 import SuccessConfettiModal from '@/components/common/SuccessConfettiModal';
 import AddMemberModal from '@/components/calendar/AddMemberModal';
-import { UpdateModal } from '@/components/common/UpdateModal';
-import {
-  checkForUpdate,
-  getCurrentAppVersion,
-  ReleaseInfo,
-} from '@/services/updateService';
+import { getCurrentAppVersion } from '@/services/updateService';
 
 function formatCzechDateFull(dateStr: string): string {
   const [y, m, d] = dateStr.split('-').map(Number);
@@ -107,8 +102,6 @@ export default function CalendarScreen() {
   const [confettiSubtitle, setConfettiSubtitle] = useState('Vše je úspěšně synchronizováno v cloudu');
   const [addMemberModalVisible, setAddMemberModalVisible] = useState(false);
   const [currentInitialNote, setCurrentInitialNote] = useState<string | null>(null);
-  const [updateModalVisible, setUpdateModalVisible] = useState(false);
-  const [availableRelease, setAvailableRelease] = useState<ReleaseInfo | null>(null);
 
   const ui = {
     bg: isDark ? '#090D16' : '#F8FAFC',
@@ -129,23 +122,6 @@ export default function CalendarScreen() {
     }
   }, [currentUser, currentGroup]);
 
-  // Silent update check na pozadí při startu (svižný interval 1.2s po vykreslení)
-  useEffect(() => {
-    const checkSilentUpdate = async () => {
-      try {
-        const result = await checkForUpdate();
-        if (result.hasUpdate && result.release) {
-          setAvailableRelease(result.release);
-          setUpdateModalVisible(true);
-        }
-      } catch {
-        // Tichá kontrola na pozadí tiše ignoruje případný offline stav
-      }
-    };
-    const timer = setTimeout(checkSilentUpdate, 1200);
-    return () => clearTimeout(timer);
-  }, []);
-
   // Load presets & sync initial shifts
   useEffect(() => {
     if (!currentGroup?.id) return;
@@ -165,7 +141,7 @@ export default function CalendarScreen() {
     initData();
   }, [currentGroup?.id, currentMonth]);
 
-  // Auto-sync whenever user returns to the app from background + check for new release
+  // Auto-sync whenever user returns to the app from background
   useEffect(() => {
     if (!currentGroup?.id) return;
 
@@ -174,14 +150,6 @@ export default function CalendarScreen() {
         syncWithNeon(currentGroup.id).catch((e) => {
           console.warn('Background foreground sync notice:', e);
         });
-        checkForUpdate()
-          .then((result) => {
-            if (result.hasUpdate && result.release) {
-              setAvailableRelease(result.release);
-              setUpdateModalVisible(true);
-            }
-          })
-          .catch(() => {});
       }
     });
 
@@ -1098,13 +1066,6 @@ export default function CalendarScreen() {
         />
       )}
 
-      {/* 9. GitHub Autoupdater Modal */}
-      <UpdateModal
-        visible={updateModalVisible}
-        release={availableRelease}
-        currentVersion={getCurrentAppVersion()}
-        onClose={() => setUpdateModalVisible(false)}
-      />
     </SafeAreaView>
   );
 }
