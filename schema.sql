@@ -16,13 +16,13 @@ CREATE TABLE IF NOT EXISTS groups (
 -- 3. TABULKA UŽIVATELŮ (Členové rodiny s vlastním jménem a barvou)
 CREATE TABLE IF NOT EXISTS users (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    group_id UUID NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
-    email_or_phone TEXT NOT NULL,
+    group_id UUID REFERENCES groups(id) ON DELETE CASCADE,
+    email_or_phone TEXT UNIQUE NOT NULL,
     display_name TEXT NOT NULL,
     color VARCHAR(20) NOT NULL DEFAULT '#0EA5E9',
+    role VARCHAR(20) NOT NULL DEFAULT 'member', -- 'admin' nebo 'member'
     password_hash TEXT NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    CONSTRAINT uq_user_in_group UNIQUE (group_id, email_or_phone)
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 -- 4. TABULKA TYPŮ SMĚN (Předvolby např. 'Noční Jirka', 'Denní Hanka', '14-18', flexi)

@@ -16,10 +16,11 @@ export interface DbGroup {
 
 export interface DbUser {
   id: string;
-  group_id: string;
+  group_id: string | null;
   email_or_phone: string;
   display_name: string;
   color: string;
+  role: 'admin' | 'member';
   password_hash: string;
   created_at: string;
 }
