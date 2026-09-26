@@ -129,7 +129,7 @@ export default function CalendarScreen() {
     }
   }, [currentUser, currentGroup]);
 
-  // Silent update check na pozadí při startu
+  // Silent update check na pozadí při startu (svižný interval 1.2s po vykreslení)
   useEffect(() => {
     const checkSilentUpdate = async () => {
       try {
@@ -142,7 +142,7 @@ export default function CalendarScreen() {
         // Tichá kontrola na pozadí tiše ignoruje případný offline stav
       }
     };
-    const timer = setTimeout(checkSilentUpdate, 2500);
+    const timer = setTimeout(checkSilentUpdate, 1200);
     return () => clearTimeout(timer);
   }, []);
 
@@ -165,7 +165,7 @@ export default function CalendarScreen() {
     initData();
   }, [currentGroup?.id, currentMonth]);
 
-  // Auto-sync whenever user returns to the app from background
+  // Auto-sync whenever user returns to the app from background + check for new release
   useEffect(() => {
     if (!currentGroup?.id) return;
 
@@ -174,6 +174,14 @@ export default function CalendarScreen() {
         syncWithNeon(currentGroup.id).catch((e) => {
           console.warn('Background foreground sync notice:', e);
         });
+        checkForUpdate()
+          .then((result) => {
+            if (result.hasUpdate && result.release) {
+              setAvailableRelease(result.release);
+              setUpdateModalVisible(true);
+            }
+          })
+          .catch(() => {});
       }
     });
 

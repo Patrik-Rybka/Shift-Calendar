@@ -14,10 +14,10 @@ export async function batchUpsertShifts(shiftsToUpsert: DbShift[]): Promise<bool
   if (shiftsToUpsert.length === 0) return true;
 
   try {
-    for (const shift of shiftsToUpsert) {
+    const upsertPromises = shiftsToUpsert.map((shift) => {
       const dateStr = typeof shift.date === 'string' ? shift.date.split('T')[0] : shift.date;
 
-      await sql`
+      return sql`
         INSERT INTO shifts (
           group_id,
           user_id,
@@ -43,7 +43,9 @@ export async function batchUpsertShifts(shiftsToUpsert: DbShift[]): Promise<bool
           note = EXCLUDED.note,
           updated_at = NOW();
       `;
-    }
+    });
+
+    await Promise.all(upsertPromises);
     return true;
   } catch (error) {
     console.error('Failed to batch upsert shifts:', error);
@@ -58,14 +60,15 @@ export async function batchDeleteShifts(targets: ShiftDeleteTarget[]): Promise<b
   if (targets.length === 0) return true;
 
   try {
-    for (const target of targets) {
-      await sql`
+    const deletePromises = targets.map((target) =>
+      sql`
         DELETE FROM shifts
         WHERE group_id = ${target.groupId}
           AND user_id = ${target.userId}
           AND date = ${target.date};
-      `;
-    }
+      `
+    );
+    await Promise.all(deletePromises);
     return true;
   } catch (error) {
     console.error('Failed to batch delete shifts:', error);
