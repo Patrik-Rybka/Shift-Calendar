@@ -40,7 +40,7 @@ export interface CheckUpdateResult {
  * Zjistí aktuální verzi nainstalované aplikace (např. "1.0.0")
  */
 export function getCurrentAppVersion(): string {
-  return Constants.expoConfig?.version || '1.0.0';
+  return Constants.expoConfig?.version || '1.0.1';
 }
 
 /**
