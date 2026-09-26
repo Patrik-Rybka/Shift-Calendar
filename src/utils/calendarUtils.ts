@@ -18,6 +18,32 @@ export function formatLocalDate(year: number, month: number, day: number): strin
   return `${year}-${m}-${d}`;
 }
 
+export function formatDateObj(date: Date): string {
+  return formatLocalDate(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
+/**
+ * Returns an array of exact YYYY-MM-DD date strings between startDateStr and endDateStr (inclusive).
+ * Uses local noon (12:00:00) so it is 100% immune to UTC offset skew and Daylight Saving Time (DST).
+ */
+export function getDatesBetween(startDateStr: string, endDateStr: string): string[] {
+  const min = startDateStr < endDateStr ? startDateStr : endDateStr;
+  const max = startDateStr < endDateStr ? endDateStr : startDateStr;
+
+  const [sY, sM, sD] = min.split('-').map(Number);
+  const [eY, eM, eD] = max.split('-').map(Number);
+
+  const dates: string[] = [];
+  const current = new Date(sY, sM - 1, sD, 12, 0, 0);
+  const end = new Date(eY, eM - 1, eD, 12, 0, 0);
+
+  while (current <= end) {
+    dates.push(formatDateObj(current));
+    current.setDate(current.getDate() + 1);
+  }
+  return dates;
+}
+
 /**
  * Generates all cells for a 7-column calendar matrix (Monday to Sunday).
  */

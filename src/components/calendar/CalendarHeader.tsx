@@ -46,7 +46,7 @@ export default function CalendarHeader({ onSave }: CalendarHeaderProps) {
   const router = useRouter();
   const isDark = useColorScheme() === 'dark';
 
-  const { currentGroup } = useAuthStore();
+  const { currentGroup, currentUser } = useAuthStore();
   const {
     currentMonth,
     nextMonth,
@@ -54,6 +54,8 @@ export default function CalendarHeader({ onSave }: CalendarHeaderProps) {
     setCurrentMonth,
     isEditMode,
     setEditMode,
+    editingUserId,
+    setEditingUserId,
     syncStatus,
     syncWithNeon,
   } = useShiftStore();
@@ -97,11 +99,16 @@ export default function CalendarHeader({ onSave }: CalendarHeaderProps) {
 
   const handleEditToggle = async () => {
     if (isEditMode) {
+      if (syncStatus === 'syncing') return;
       if (onSave) {
         await onSave();
+      } else {
+        setEditMode(false);
       }
-      setEditMode(false);
     } else {
+      if (!editingUserId && currentUser) {
+        setEditingUserId(currentUser.id);
+      }
       setEditMode(true);
     }
   };
@@ -198,15 +205,21 @@ export default function CalendarHeader({ onSave }: CalendarHeaderProps) {
               isEditMode
                 ? { backgroundColor: ui.editActiveBg }
                 : { backgroundColor: ui.accent },
+              isEditMode && syncStatus === 'syncing' && { opacity: 0.8 },
             ]}
             activeOpacity={0.85}
+            disabled={isEditMode && syncStatus === 'syncing'}
             onPress={handleEditToggle}
           >
             {isEditMode ? (
-              <>
-                <Save size={15} color="#FFFFFF" strokeWidth={2.5} />
-                <Text style={styles.editButtonText}>Uložit</Text>
-              </>
+              syncStatus === 'syncing' ? (
+                <ActivityIndicator size="small" color="#FFFFFF" style={{ paddingHorizontal: 10 }} />
+              ) : (
+                <>
+                  <Save size={15} color="#FFFFFF" strokeWidth={2.5} />
+                  <Text style={styles.editButtonText}>Uložit</Text>
+                </>
+              )
             ) : (
               <>
                 <Pencil size={15} color="#FFFFFF" strokeWidth={2.5} />

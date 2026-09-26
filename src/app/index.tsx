@@ -9,24 +9,53 @@ import {
   Modal,
   useColorScheme,
   ActivityIndicator,
+  Alert,
+  AppState,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { Calendar as CalendarIcon, Clock, X, Users, AlertCircle, Crown } from 'lucide-react-native';
+import {
+  Calendar as CalendarIcon,
+  Clock,
+  X,
+  Users,
+  AlertCircle,
+  Crown,
+  FileText,
+  UserPlus,
+  Pencil,
+} from 'lucide-react-native';
 
 import { useAuthStore } from '@/store/useAuthStore';
 import { useShiftStore, getShiftMapKey } from '@/store/useShiftStore';
 import { getGroupPresets } from '@/services/db/shiftService';
-import { CalendarDay } from '@/utils/calendarUtils';
+import { fetchGroupShiftsRange } from '@/services/db/syncService';
+import { CalendarDay, getDatesBetween, formatLocalDate } from '@/utils/calendarUtils';
 
 import CalendarHeader from '@/components/calendar/CalendarHeader';
 import CalendarGrid from '@/components/calendar/CalendarGrid';
+import EditToolbar from '@/components/calendar/EditToolbar';
+import ShiftPickerModal from '@/components/calendar/ShiftPickerModal';
+import SuccessConfettiModal from '@/components/common/SuccessConfettiModal';
+import AddMemberModal from '@/components/calendar/AddMemberModal';
+
+function formatCzechDateFull(dateStr: string): string {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const dateObj = new Date(y, m - 1, d);
+  const daysCs = ['Neděle', 'Pondělí', 'Úterý', 'Středa', 'Čtvrtek', 'Pátek', 'Sobota'];
+  const monthsCs = [
+    'ledna', 'února', 'března', 'dubna', 'května', 'června',
+    'července', 'srpna', 'září', 'října', 'listopadu', 'prosince',
+  ];
+  const dayName = daysCs[dateObj.getDay()];
+  return `${dayName}, ${d}. ${monthsCs[m - 1]} ${y}`;
+}
 
 export default function CalendarScreen() {
   const router = useRouter();
   const isDark = useColorScheme() === 'dark';
 
-  const { currentUser, currentGroup, groupMembers } = useAuthStore();
+  const { currentUser, currentGroup, groupMembers, setGroupMembers } = useAuthStore();
   const {
     presets,
     setPresets,
@@ -35,10 +64,29 @@ export default function CalendarScreen() {
     syncStatus,
     currentMonth,
     isEditMode,
+    setEditMode,
+    rangeStart,
+    rangeEnd,
+    setRangeStart,
+    setRangeEnd,
+    clearRangeSelection,
+    discardPendingChanges,
+    applyShift,
+    removeShift,
+    editingUserId,
+    setEditingUserId,
+    pendingChanges,
   } = useShiftStore();
 
   const [refreshing, setRefreshing] = useState(false);
   const [selectedDayDetail, setSelectedDayDetail] = useState<CalendarDay | null>(null);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [pickerVisible, setPickerVisible] = useState(false);
+  const [selectedRange, setSelectedRange] = useState<{ start: string; end: string } | null>(null);
+  const [confettiVisible, setConfettiVisible] = useState(false);
+  const [confettiSubtitle, setConfettiSubtitle] = useState('Vše je úspěšně synchronizováno v cloudu');
+  const [addMemberModalVisible, setAddMemberModalVisible] = useState(false);
+  const [currentInitialNote, setCurrentInitialNote] = useState<string | null>(null);
 
   const ui = {
     bg: isDark ? '#090D16' : '#F8FAFC',
@@ -54,7 +102,7 @@ export default function CalendarScreen() {
   useEffect(() => {
     if (!currentUser) {
       router.replace('/welcome');
-    } else if (!currentGroup) {
+    } else if (!currentGroup || currentUser.status === 'pending') {
       router.replace('/group-choice' as any);
     }
   }, [currentUser, currentGroup]);
@@ -77,6 +125,23 @@ export default function CalendarScreen() {
 
     initData();
   }, [currentGroup?.id, currentMonth]);
+
+  // Auto-sync whenever user returns to the app from background
+  useEffect(() => {
+    if (!currentGroup?.id) return;
+
+    const subscription = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'active') {
+        syncWithNeon(currentGroup.id).catch((e) => {
+          console.warn('Background foreground sync notice:', e);
+        });
+      }
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, [currentGroup?.id, syncWithNeon]);
 
   // Pull to refresh
   const onRefresh = useCallback(async () => {
@@ -112,8 +177,8 @@ export default function CalendarScreen() {
     for (const member of groupMembers) {
       const key = getShiftMapKey(member.id, day.dateStr);
       const shift = shifts[key];
-      if (shift && shift.shift_preset_id) {
-        const preset = presets.find((p) => p.id === shift.shift_preset_id);
+      if (shift && (shift.shift_preset_id || (shift.note && shift.note.trim().length > 0))) {
+        const preset = shift.shift_preset_id ? presets.find((p) => p.id === shift.shift_preset_id) : undefined;
         dayShifts.push({
           member,
           preset,
@@ -128,8 +193,8 @@ export default function CalendarScreen() {
     return (
       <View style={styles.cellShiftsContainer}>
         {dayShifts.slice(0, 3).map((item, idx) => {
-          const presetColor = item.preset?.color || item.member.color || '#2563EB';
-          const title = item.preset?.title || item.preset?.short_code || 'Směna';
+          const pillColor = item.preset?.color || item.member.color || '#2563EB';
+          const title = item.preset?.title || item.preset?.short_code || item.note || 'Poznámka';
 
           return (
             <View
@@ -137,8 +202,8 @@ export default function CalendarScreen() {
               style={[
                 styles.shiftPill,
                 {
-                  backgroundColor: isDark ? `${presetColor}25` : `${presetColor}18`,
-                  borderColor: isDark ? `${presetColor}50` : `${presetColor}40`,
+                  backgroundColor: isDark ? `${pillColor}25` : `${pillColor}18`,
+                  borderColor: isDark ? `${pillColor}50` : `${pillColor}40`,
                 },
               ]}
             >
@@ -149,6 +214,15 @@ export default function CalendarScreen() {
                   { backgroundColor: item.member.color || '#0EA5E9' },
                 ]}
               />
+
+              {/* Note icon if note is attached */}
+              {item.note && item.note.trim().length > 0 && (
+                <FileText
+                  size={8.5}
+                  color={isDark ? '#93C5FD' : '#2563EB'}
+                  strokeWidth={2.5}
+                />
+              )}
 
               {/* Shift Title (clean, no brackets) */}
               <Text
@@ -174,23 +248,208 @@ export default function CalendarScreen() {
     );
   };
 
-  const handleDayPress = (day: CalendarDay) => {
-    if (isEditMode) {
-      // In edit mode, stamping logic is handled in Phase 6
+  const isDateSelected = useCallback(
+    (dateStr: string) => {
+      if (!isEditMode) return false;
+      if (!rangeStart) return false;
+      if (!rangeEnd) return dateStr === rangeStart;
+
+      const min = rangeStart < rangeEnd ? rangeStart : rangeEnd;
+      const max = rangeStart < rangeEnd ? rangeEnd : rangeStart;
+      return dateStr >= min && dateStr <= max;
+    },
+    [isEditMode, rangeStart, rangeEnd]
+  );
+
+  const handleRangeDragChange = useCallback(
+    (startDateStr: string, endDateStr: string) => {
+      const minDate = startDateStr < endDateStr ? startDateStr : endDateStr;
+      const maxDate = startDateStr < endDateStr ? endDateStr : startDateStr;
+      setRangeStart(minDate);
+      setRangeEnd(maxDate);
+    },
+    [setRangeStart, setRangeEnd]
+  );
+
+  const handleRangeDragComplete = useCallback(
+    (startDateStr: string, endDateStr: string) => {
+      const minDate = startDateStr < endDateStr ? startDateStr : endDateStr;
+      const maxDate = startDateStr < endDateStr ? endDateStr : startDateStr;
+      const targetUserId = editingUserId || currentUser?.id;
+      const key = targetUserId ? getShiftMapKey(targetUserId, minDate) : '';
+      const existingShift = key ? shifts[key] : null;
+
+      setCurrentInitialNote(existingShift?.note || null);
+      setRangeStart(minDate);
+      setRangeEnd(maxDate);
+      setSelectedRange({ start: minDate, end: maxDate });
+      setPickerVisible(true);
+    },
+    [setRangeStart, setRangeEnd, editingUserId, currentUser?.id, shifts]
+  );
+
+  const handleDayTapInEditMode = useCallback(
+    (day: CalendarDay) => {
+      if (!day.isCurrentMonth) return;
+
+      const targetUserId = editingUserId || currentUser?.id;
+      const key = targetUserId ? getShiftMapKey(targetUserId, day.dateStr) : '';
+      const existingShift = key ? shifts[key] : null;
+
+      setCurrentInitialNote(existingShift?.note || null);
+      setRangeStart(day.dateStr);
+      setRangeEnd(day.dateStr);
+      setSelectedRange({ start: day.dateStr, end: day.dateStr });
+      setPickerVisible(true);
+    },
+    [setRangeStart, setRangeEnd, editingUserId, currentUser?.id, shifts]
+  );
+
+  const showToast = useCallback((msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => {
+      setToastMessage((cur) => (cur === msg ? null : cur));
+    }, 2800);
+  }, []);
+
+  const handleApplyPresetFromModal = useCallback(
+    (presetId: string | null, note?: string | null) => {
+      const targetUserId = editingUserId || currentUser?.id;
+      if (!currentGroup?.id || !targetUserId || !selectedRange) return;
+
+      // Safely generate exact date strings without any UTC/timezone skew
+      const dates = getDatesBetween(selectedRange.start, selectedRange.end);
+
+      for (const dStr of dates) {
+        if (presetId === '__DELETE__' || presetId === null) {
+          removeShift(currentGroup.id, targetUserId, dStr);
+        } else if (presetId === '__NOTE_ONLY__') {
+          const existingKey = getShiftMapKey(targetUserId, dStr);
+          const existingShift = shifts[existingKey];
+          applyShift({
+            groupId: currentGroup.id,
+            userId: targetUserId,
+            date: dStr,
+            presetId: existingShift?.shift_preset_id || null,
+            note: note !== undefined ? note : null,
+          });
+        } else {
+          applyShift({
+            groupId: currentGroup.id,
+            userId: targetUserId,
+            date: dStr,
+            presetId,
+            note: note !== undefined ? note : null,
+          });
+        }
+      }
+
+      setPickerVisible(false);
+      clearRangeSelection();
+      setSelectedRange(null);
+      setCurrentInitialNote(null);
+
+      const presetObj = presets.find((p) => p.id === presetId);
+      const title =
+        presetId === '__DELETE__'
+          ? 'Volno'
+          : presetId === '__NOTE_ONLY__'
+          ? 'Poznámka'
+          : presetObj?.title || 'Směna';
+      showToast(`✓ ${title} uložena`);
+    },
+    [
+      editingUserId,
+      currentUser?.id,
+      currentGroup?.id,
+      selectedRange,
+      shifts,
+      removeShift,
+      applyShift,
+      clearRangeSelection,
+      presets,
+      showToast,
+    ]
+  );
+
+  const handleSaveShifts = useCallback(async () => {
+    if (!currentGroup?.id) {
+      setEditMode(false);
       return;
     }
+
+    const hasPending = Object.keys(pendingChanges).length > 0;
+    if (!hasPending) {
+      setEditMode(false);
+      return;
+    }
+
+    try {
+      const ok = await syncWithNeon(currentGroup.id);
+      setEditMode(false);
+      if (ok) {
+        setConfettiSubtitle('Vše je úspěšně uloženo a synchronizováno v cloudu');
+        setConfettiVisible(true);
+      } else {
+        setConfettiSubtitle('Směny jsou uloženy v paměti telefonu (offline)');
+        setConfettiVisible(true);
+      }
+    } catch (e) {
+      console.warn('Save error:', e);
+      setEditMode(false);
+      setConfettiSubtitle('Směny jsou uloženy v paměti telefonu');
+      setConfettiVisible(true);
+    }
+  }, [currentGroup?.id, pendingChanges, syncWithNeon, setEditMode]);
+
+  const handleCancelEdit = useCallback(async () => {
+    if (!currentGroup?.id) {
+      discardPendingChanges();
+      setEditMode(false);
+      return;
+    }
+
+    discardPendingChanges();
+    setEditMode(false);
+
+    try {
+      const year = currentMonth.getFullYear();
+      const month = currentMonth.getMonth();
+      const startDate = formatLocalDate(year, month - 1, 20);
+      const endDate = formatLocalDate(year, month + 2, 10);
+      const remoteShifts = await fetchGroupShiftsRange(currentGroup.id, startDate, endDate);
+      useShiftStore.getState().setShifts(remoteShifts);
+      showToast('Úpravy byly zrušeny');
+    } catch (e) {
+      console.warn('Failed to revert shifts:', e);
+    }
+  }, [currentGroup?.id, currentMonth, discardPendingChanges, setEditMode, showToast]);
+
+  const handleDayPress = (day: CalendarDay) => {
+    if (isEditMode) {
+      handleDayTapInEditMode(day);
+      return;
+    }
+
     // In view mode, tap opens day detail modal
     setSelectedDayDetail(day);
+  };
+
+  const handleEditThisDay = (day: CalendarDay) => {
+    setSelectedDayDetail(null);
+    setEditMode(true);
+    handleDayTapInEditMode(day);
   };
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: ui.bg }]}>
       {/* 1. Calendar Header (Month navigation, Sync badge, Group Code, Edit toggle) */}
-      <CalendarHeader />
+      <CalendarHeader onSave={handleSaveShifts} />
 
-      {/* 2. Main Scrollable Calendar Grid */}
+      {/* 2. Main Scrollable Calendar Grid (Never blocked by EditMode, zero layout jump) */}
       <ScrollView
-        contentContainerStyle={styles.scrollContent}
+        scrollEnabled={true}
+        contentContainerStyle={[styles.scrollContent, isEditMode && { paddingBottom: 180 }]}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -204,36 +463,87 @@ export default function CalendarScreen() {
         <CalendarGrid
           onDayPress={handleDayPress}
           renderCellContent={renderCellContent}
+          isDateSelected={isDateSelected}
+          isEditMode={isEditMode}
+          onRangeDragChange={handleRangeDragChange}
+          onRangeDragComplete={handleRangeDragComplete}
+          onDayTapInEditMode={handleDayTapInEditMode}
         />
 
-        {/* Legend / Quick Family Summary */}
-        <View style={[styles.familySummaryBox, { backgroundColor: ui.card, borderColor: ui.border }]}>
-          <View style={styles.summaryTitleRow}>
-            <Users size={16} color={ui.accent} />
-            <Text style={[styles.summaryTitle, { color: ui.text }]}>Členové rodiny v kalendáři</Text>
-          </View>
-
-          <View style={styles.membersListRow}>
-            {groupMembers.map((member) => (
-              <View key={member.id} style={[styles.memberTag, { backgroundColor: isDark ? '#161F33' : '#F1F5F9', borderColor: ui.border }]}>
-                <View style={[styles.legendAvatarCircle, { backgroundColor: member.color }]}>
-                  <Text style={styles.legendAvatarText}>
-                    {member.display_name.charAt(0).toUpperCase()}
-                  </Text>
-                </View>
-                <Text style={[styles.memberNameText, { color: ui.text }]}>
-                  {member.display_name} {member.id === currentUser.id && '(Já)'}
+        {/* Legend / Quick Family Summary (Visible in View Mode only) */}
+        {!isEditMode && (
+          <View style={[styles.familySummaryBox, { backgroundColor: ui.card, borderColor: ui.border }]}>
+            <View style={styles.summaryTitleRow}>
+              <View style={styles.summaryTitleLeft}>
+                <Users size={16} color={ui.accent} />
+                <Text style={[styles.summaryTitle, { color: ui.text }]}>
+                  Rodina ({groupMembers.length})
                 </Text>
-                {member.role === 'admin' && (
-                  <Crown size={12} color="#F59E0B" />
-                )}
               </View>
-            ))}
+              <TouchableOpacity
+                style={[styles.addMemberBtnSmall, { borderColor: ui.border, backgroundColor: isDark ? '#161F33' : '#F1F5F9' }]}
+                onPress={() => setAddMemberModalVisible(true)}
+                activeOpacity={0.75}
+              >
+                <UserPlus size={13} color={ui.accent} />
+                <Text style={[styles.addMemberBtnSmallText, { color: ui.accent }]}>+ Přidat člena</Text>
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.membersListRow}>
+              {groupMembers.map((member) => (
+                <View key={member.id} style={[styles.memberTag, { backgroundColor: isDark ? '#161F33' : '#F1F5F9', borderColor: ui.border }]}>
+                  <View style={[styles.legendAvatarCircle, { backgroundColor: member.color }]}>
+                    <Text style={styles.legendAvatarText}>
+                      {member.display_name.charAt(0).toUpperCase()}
+                    </Text>
+                  </View>
+                  <Text style={[styles.memberNameText, { color: ui.text }]}>
+                    {member.display_name} {member.id === currentUser?.id && '(Já)'}
+                  </Text>
+                  {member.role === 'admin' && (
+                    <Crown size={12} color="#F59E0B" />
+                  )}
+                </View>
+              ))}
+            </View>
           </View>
-        </View>
+        )}
       </ScrollView>
 
-      {/* 3. Day Detail Modal (when user taps a day in View Mode) */}
+      {/* 3. Full-Screen Shift Picker Modal (revealed on tap or drag in Edit Mode) */}
+      <ShiftPickerModal
+        visible={pickerVisible}
+        onClose={() => {
+          setPickerVisible(false);
+          clearRangeSelection();
+          setSelectedRange(null);
+          setCurrentInitialNote(null);
+        }}
+        startDate={selectedRange?.start || null}
+        endDate={selectedRange?.end || null}
+        initialNote={currentInitialNote}
+        onSelectPreset={handleApplyPresetFromModal}
+      />
+
+      {/* 4. Center Celebration Modal with Confetti Explosion */}
+      <SuccessConfettiModal
+        visible={confettiVisible}
+        onDismiss={() => setConfettiVisible(false)}
+        title="Směny uloženy!"
+        subtitle={confettiSubtitle}
+      />
+
+      {/* 5. Floating Toast Notification for quick notices */}
+      {toastMessage && (
+        <View style={styles.toastContainer} pointerEvents="none">
+          <View style={[styles.toastPill, { backgroundColor: isDark ? '#1E293B' : '#0F172A' }]}>
+            <Text style={styles.toastText}>{toastMessage}</Text>
+          </View>
+        </View>
+      )}
+
+      {/* 6. Day Detail Modal (when user taps a day in View Mode) */}
       {selectedDayDetail && (
         <Modal
           visible={!!selectedDayDetail}
@@ -248,7 +558,7 @@ export default function CalendarScreen() {
                 <View style={styles.modalTitleBox}>
                   <CalendarIcon size={20} color={ui.accent} />
                   <Text style={[styles.modalDateTitle, { color: ui.text }]}>
-                    {selectedDayDetail.dayNumber}. {selectedDayDetail.dateStr}
+                    {formatCzechDateFull(selectedDayDetail.dateStr)}
                   </Text>
                 </View>
 
@@ -270,54 +580,96 @@ export default function CalendarScreen() {
                     : null;
 
                   return (
-                    <View
-                      key={member.id}
-                      style={[styles.modalMemberRow, { borderColor: ui.border }]}
-                    >
-                      {/* Member Info */}
-                      <View style={styles.modalMemberInfo}>
-                        <View style={[styles.memberAvatarSmall, { backgroundColor: member.color }]}>
-                          <Text style={styles.memberAvatarInitial}>
-                            {member.display_name.charAt(0).toUpperCase()}
+                    <View key={member.id} style={{ gap: 4 }}>
+                      <View
+                        style={[styles.modalMemberRow, { borderColor: ui.border }]}
+                      >
+                        {/* Member Info */}
+                        <View style={styles.modalMemberInfo}>
+                          <View style={[styles.memberAvatarSmall, { backgroundColor: member.color }]}>
+                            <Text style={styles.memberAvatarInitial}>
+                              {member.display_name.charAt(0).toUpperCase()}
+                            </Text>
+                          </View>
+                          <Text style={[styles.modalMemberName, { color: ui.text }]}>
+                            {member.display_name} {member.id === currentUser?.id && '(Já)'}
                           </Text>
                         </View>
-                        <Text style={[styles.modalMemberName, { color: ui.text }]}>
-                          {member.display_name}
-                        </Text>
+
+                        {/* Shift Badge or Off */}
+                        {preset ? (
+                          <View
+                            style={[
+                              styles.modalShiftBadge,
+                              {
+                                backgroundColor: `${preset.color}20`,
+                                borderColor: preset.color,
+                              },
+                            ]}
+                          >
+                            <Text style={[styles.modalShiftTitle, { color: preset.color }]}>
+                              {preset.title}
+                            </Text>
+                            {preset.start_time && preset.end_time && (
+                              <Text style={[styles.modalShiftTimes, { color: ui.textMuted }]}>
+                                {preset.start_time} – {preset.end_time} ({preset.hours}h)
+                              </Text>
+                            )}
+                          </View>
+                        ) : (
+                          <Text style={[styles.noShiftText, { color: ui.textMuted }]}>
+                            Bez zapsané směny
+                          </Text>
+                        )}
                       </View>
 
-                      {/* Shift Badge or Off */}
-                      {preset ? (
-                        <View
-                          style={[
-                            styles.modalShiftBadge,
-                            {
-                              backgroundColor: `${preset.color}20`,
-                              borderColor: preset.color,
-                            },
-                          ]}
-                        >
-                          <Text style={[styles.modalShiftTitle, { color: preset.color }]}>
-                            {preset.title}
+                      {/* Display shift note if any */}
+                      {shift?.note && shift.note.trim().length > 0 && (
+                        <View style={[styles.modalNoteBubble, { backgroundColor: isDark ? '#161F33' : '#F1F5F9', borderColor: ui.border }]}>
+                          <FileText size={12} color={ui.accent} />
+                          <Text style={[styles.modalNoteText, { color: ui.text }]}>
+                            {shift.note}
                           </Text>
-                          {preset.start_time && preset.end_time && (
-                            <Text style={[styles.modalShiftTimes, { color: ui.textMuted }]}>
-                              {preset.start_time} – {preset.end_time}
-                            </Text>
-                          )}
                         </View>
-                      ) : (
-                        <Text style={[styles.noShiftText, { color: ui.textMuted }]}>
-                          Bez zapsané směny
-                        </Text>
                       )}
                     </View>
                   );
                 })}
               </View>
+
+              {/* Action Button: Edit shifts/notes for this day */}
+              <TouchableOpacity
+                style={[styles.modalEditDayBtn, { backgroundColor: ui.accent }]}
+                activeOpacity={0.88}
+                onPress={() => handleEditThisDay(selectedDayDetail)}
+              >
+                <Pencil size={15} color="#FFFFFF" strokeWidth={2.5} />
+                <Text style={styles.modalEditDayBtnText}>Upravit směny a poznámky dne</Text>
+              </TouchableOpacity>
             </View>
           </View>
         </Modal>
+      )}
+
+      {/* 7. Add Family Member Modal (Kids, relatives without app) */}
+      <AddMemberModal
+        visible={addMemberModalVisible}
+        onClose={() => setAddMemberModalVisible(false)}
+        groupId={currentGroup?.id || ''}
+        onMemberAdded={(newMember) => {
+          setGroupMembers([...groupMembers, newMember]);
+          setEditingUserId(newMember.id);
+          showToast(`Člen „${newMember.display_name}“ byl úspěšně přidán`);
+        }}
+      />
+
+      {/* 8. Docked Editing Toolbar (slides up at the bottom without displacing the calendar!) */}
+      {isEditMode && (
+        <EditToolbar
+          onSave={handleSaveShifts}
+          onCancel={handleCancelEdit}
+          onOpenAddMember={() => setAddMemberModalVisible(true)}
+        />
       )}
     </SafeAreaView>
   );
@@ -333,19 +685,19 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   scrollContent: {
-    paddingBottom: 24,
+    paddingBottom: 40,
   },
   cellShiftsContainer: {
-    gap: 2,
+    gap: 2.5,
     width: '100%',
   },
   shiftPill: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 3,
-    paddingHorizontal: 3,
-    paddingVertical: 1.5,
-    borderRadius: 5,
+    paddingHorizontal: 4,
+    paddingVertical: 2,
+    borderRadius: 6,
     borderWidth: 1,
   },
   memberDot: {
@@ -354,24 +706,30 @@ const styles = StyleSheet.create({
     borderRadius: 3,
   },
   shiftPillText: {
-    fontSize: 9.5,
+    fontSize: 10,
     fontWeight: '700',
     flexShrink: 1,
   },
   moreCountText: {
-    fontSize: 8.5,
+    fontSize: 9,
     fontWeight: '600',
     textAlign: 'center',
   },
   familySummaryBox: {
     marginHorizontal: 16,
     marginTop: 16,
+    marginBottom: 24,
     padding: 14,
     borderRadius: 16,
     borderWidth: 1,
     gap: 10,
   },
   summaryTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  summaryTitleLeft: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
@@ -498,5 +856,77 @@ const styles = StyleSheet.create({
   noShiftText: {
     fontSize: 13,
     fontStyle: 'italic',
+  },
+  toastContainer: {
+    position: 'absolute',
+    bottom: 24,
+    left: 20,
+    right: 20,
+    alignItems: 'center',
+    zIndex: 999,
+  },
+  toastPill: {
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+    borderRadius: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  toastText: {
+    color: '#FFFFFF',
+    fontSize: 13.5,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  modalNoteBubble: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 10,
+    borderWidth: 1,
+    marginTop: 2,
+    marginBottom: 6,
+  },
+  modalNoteText: {
+    fontSize: 12.5,
+    fontWeight: '600',
+    flex: 1,
+  },
+  modalEditDayBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 13,
+    borderRadius: 14,
+    marginTop: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.2,
+    shadowRadius: 6,
+    elevation: 3,
+  },
+  modalEditDayBtnText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  addMemberBtnSmall: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 12,
+    borderWidth: 1,
+  },
+  addMemberBtnSmallText: {
+    fontSize: 11.5,
+    fontWeight: '700',
   },
 });

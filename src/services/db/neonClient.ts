@@ -11,6 +11,8 @@ export interface DbGroup {
   id: string;
   name: string;
   join_code: string;
+  password_hash?: string | null;
+  require_approval: boolean;
   created_at: string;
 }
 
@@ -21,6 +23,7 @@ export interface DbUser {
   display_name: string;
   color: string;
   role: 'admin' | 'member';
+  status: 'active' | 'pending' | 'rejected';
   password_hash: string;
   created_at: string;
 }

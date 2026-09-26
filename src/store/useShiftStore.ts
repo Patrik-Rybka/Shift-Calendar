@@ -3,6 +3,7 @@ import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { DbShift, DbShiftPreset } from '../services/db/neonClient';
 import { batchUpsertShifts, batchDeleteShifts, fetchGroupShiftsRange } from '../services/db/syncService';
+import { formatLocalDate } from '@/utils/calendarUtils';
 
 export type EditSubMode = 'stamp' | 'range';
 export type SyncStatus = 'synced' | 'syncing' | 'offline' | 'pending' | 'error';
@@ -58,6 +59,7 @@ export interface ShiftState {
   setRangeStart: (date: string | null) => void;
   setRangeEnd: (date: string | null) => void;
   clearRangeSelection: () => void;
+  discardPendingChanges: () => void;
 
   // Optimistic shift manipulation
   applyShift: (params: {
@@ -127,10 +129,12 @@ export const useShiftStore = create<ShiftState>()(
       setSyncStatus: (status) => set({ syncStatus: status }),
 
       setEditMode: (enabled) => {
+        const presets = get().presets;
         set({
           isEditMode: enabled,
           rangeStart: null,
           rangeEnd: null,
+          selectedPresetId: enabled ? (get().selectedPresetId || presets[0]?.id || null) : null,
         });
       },
 
@@ -140,6 +144,7 @@ export const useShiftStore = create<ShiftState>()(
       setRangeStart: (date) => set({ rangeStart: date }),
       setRangeEnd: (date) => set({ rangeEnd: date }),
       clearRangeSelection: () => set({ rangeStart: null, rangeEnd: null }),
+      discardPendingChanges: () => set({ pendingChanges: {}, syncStatus: 'synced' }),
 
       applyShift: ({ groupId, userId, date, presetId, customHours, note }) => {
         const key = getShiftMapKey(userId, date);
@@ -241,8 +246,8 @@ export const useShiftStore = create<ShiftState>()(
           // 2. Fetch fresh shifts for visible month (with 7 days padding before and after)
           const year = currentMonth.getFullYear();
           const month = currentMonth.getMonth(); // 0-indexed
-          const startDate = new Date(year, month - 1, 20).toISOString().split('T')[0];
-          const endDate = new Date(year, month + 2, 10).toISOString().split('T')[0];
+          const startDate = formatLocalDate(year, month - 1, 20);
+          const endDate = formatLocalDate(year, month + 2, 10);
 
           const remoteShifts = await fetchGroupShiftsRange(groupId, startDate, endDate);
           get().setShifts(remoteShifts);
