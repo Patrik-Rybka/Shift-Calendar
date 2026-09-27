@@ -2013,7 +2013,7 @@ export default function SettingsScreen() {
                 <View style={{ flex: 1, gap: 2 }}>
                   <Text style={[styles.prefTitle, { color: ui.text }]}>Kalendář směn</Text>
                   <Text style={[styles.prefSubtitle, { color: ui.textMuted }]}>
-                    Verze {getCurrentAppVersion()} (Build 6) • Expo React Native
+                    Verze {getCurrentAppVersion()} (Build 7) • Expo React Native
                   </Text>
                 </View>
 
