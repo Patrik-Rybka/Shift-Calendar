@@ -29,7 +29,7 @@ import {
 } from 'lucide-react-native';
 
 import { useAuthStore } from '@/store/useAuthStore';
-import { useShiftStore, getShiftMapKey } from '@/store/useShiftStore';
+import { useShiftStore, getShiftMapKey, getUserShiftsForDay } from '@/store/useShiftStore';
 import { useSettingsStore } from '@/store/useSettingsStore';
 import { getGroupPresets } from '@/services/db/shiftService';
 import { fetchGroupShiftsRange } from '@/services/db/syncService';
@@ -241,23 +241,24 @@ export default function CalendarScreen() {
     > = {};
 
     for (const member of visibleMembers) {
-      const key = getShiftMapKey(member.id, day.dateStr);
-      const shift = safeShifts[key];
-      if (shift && shift.shift_preset_id) {
-        const preset = safePresets.find((p) => p && p.id === shift.shift_preset_id);
-        const color = preset?.color || member.color || '#2563EB';
-        const title = preset?.title || preset?.short_code || 'Směna';
-        if (!presetGroups[shift.shift_preset_id]) {
-          presetGroups[shift.shift_preset_id] = [];
+      const memberShifts = getUserShiftsForDay(safeShifts, member.id, day.dateStr);
+      for (const shift of memberShifts) {
+        if (shift && shift.shift_preset_id) {
+          const preset = safePresets.find((p) => p && p.id === shift.shift_preset_id);
+          const color = preset?.color || member.color || '#2563EB';
+          const title = preset?.title || preset?.short_code || 'Směna';
+          if (!presetGroups[shift.shift_preset_id]) {
+            presetGroups[shift.shift_preset_id] = [];
+          }
+          presetGroups[shift.shift_preset_id].push({
+            member,
+            customHours: shift.custom_hours,
+            note: shift.note,
+            preset,
+            color,
+            title,
+          });
         }
-        presetGroups[shift.shift_preset_id].push({
-          member,
-          customHours: shift.custom_hours,
-          note: shift.note,
-          preset,
-          color,
-          title,
-        });
       }
     }
 
@@ -318,12 +319,13 @@ export default function CalendarScreen() {
     const noteMap: Record<string, Array<typeof groupMembers[0]>> = {};
 
     for (const member of visibleMembers) {
-      const key = getShiftMapKey(member.id, day.dateStr);
-      const shift = safeShifts[key];
-      if (shift && !shift.shift_preset_id && typeof shift.note === 'string' && shift.note.trim().length > 0) {
-        const text = shift.note.trim();
-        if (!noteMap[text]) noteMap[text] = [];
-        noteMap[text].push(member);
+      const memberShifts = getUserShiftsForDay(safeShifts, member.id, day.dateStr);
+      for (const shift of memberShifts) {
+        if (shift && !shift.shift_preset_id && typeof shift.note === 'string' && shift.note.trim().length > 0) {
+          const text = shift.note.trim();
+          if (!noteMap[text]) noteMap[text] = [];
+          noteMap[text].push(member);
+        }
       }
     }
 
@@ -787,10 +789,10 @@ export default function CalendarScreen() {
         editingUserId === '__ALL__'
           ? (currentUser?.id || groupMembers[0]?.id)
           : (editingUserId || currentUser?.id);
-      const key = targetUserId ? getShiftMapKey(targetUserId, minDate) : '';
-      const existingShift = key ? shifts[key] : null;
+      const existingShifts = targetUserId ? getUserShiftsForDay(shifts, targetUserId, minDate) : [];
+      const existingNote = existingShifts.find((s) => s.note)?.note || null;
 
-      setCurrentInitialNote(existingShift?.note || null);
+      setCurrentInitialNote(existingNote);
       setRangeStart(minDate);
       setRangeEnd(maxDate);
       setSelectedRange({ start: minDate, end: maxDate });
@@ -807,10 +809,10 @@ export default function CalendarScreen() {
         editingUserId === '__ALL__'
           ? (currentUser?.id || groupMembers[0]?.id)
           : (editingUserId || currentUser?.id);
-      const key = targetUserId ? getShiftMapKey(targetUserId, day.dateStr) : '';
-      const existingShift = key ? shifts[key] : null;
+      const existingShifts = targetUserId ? getUserShiftsForDay(shifts, targetUserId, day.dateStr) : [];
+      const existingNote = existingShifts.find((s) => s.note)?.note || null;
 
-      setCurrentInitialNote(existingShift?.note || null);
+      setCurrentInitialNote(existingNote);
       setRangeStart(day.dateStr);
       setRangeEnd(day.dateStr);
       setSelectedRange({ start: day.dateStr, end: day.dateStr });
@@ -845,13 +847,13 @@ export default function CalendarScreen() {
           if (presetId === '__DELETE__' || presetId === null) {
             removeShift(currentGroup.id, targetUserId, dStr);
           } else if (presetId === '__NOTE_ONLY__') {
-            const existingKey = getShiftMapKey(targetUserId, dStr);
-            const existingShift = shifts[existingKey];
+            const userShifts = getUserShiftsForDay(shifts, targetUserId, dStr);
+            const firstPresetShift = userShifts.find((s) => s.shift_preset_id);
             applyShift({
               groupId: currentGroup.id,
               userId: targetUserId,
               date: dStr,
-              presetId: existingShift?.shift_preset_id || null,
+              presetId: firstPresetShift?.shift_preset_id || null,
               note: note !== undefined ? note : null,
             });
           } else {
@@ -897,7 +899,7 @@ export default function CalendarScreen() {
   );
 
   const handleMakeShiftForWholeFamily = useCallback(
-    (presetId: string, dateStr: string, note?: string | null) => {
+    async (presetId: string, dateStr: string, note?: string | null) => {
       if (!currentGroup?.id || !groupMembers?.length) return;
 
       for (const m of groupMembers) {
@@ -913,8 +915,14 @@ export default function CalendarScreen() {
       const preset = presets.find((p) => p.id === presetId);
       const title = preset?.title || 'Směna';
       showToast(`✓ ${title} nastavena pro celou rodinu`);
+
+      try {
+        await syncWithNeon(currentGroup.id);
+      } catch (err) {
+        console.warn('Sync failed after handleMakeShiftForWholeFamily:', err);
+      }
     },
-    [currentGroup?.id, groupMembers, applyShift, presets, showToast]
+    [currentGroup?.id, groupMembers, applyShift, presets, showToast, syncWithNeon]
   );
 
   const handleSaveShifts = useCallback(async () => {
@@ -1194,15 +1202,10 @@ export default function CalendarScreen() {
                 if (!selectedDayDetail || orderedMembers.length < 2) return null;
                 const visible = orderedMembers.filter((m) => !hiddenMemberIds.includes(m.id));
                 if (visible.length < 2) return null;
-                const firstShift = shifts[getShiftMapKey(visible[0].id, selectedDayDetail.dateStr)];
-                if (!firstShift?.shift_preset_id) return null;
-                const allSame = visible.every((m) => {
-                  const s = shifts[getShiftMapKey(m.id, selectedDayDetail.dateStr)];
-                  return s?.shift_preset_id === firstShift.shift_preset_id;
-                });
-                if (!allSame) return null;
-                const p = presets.find((pr) => pr.id === firstShift.shift_preset_id);
-                if (!p) return null;
+                const dayShifts = getDayShifts(selectedDayDetail);
+                const familyEvent = dayShifts.find((s) => s.isAllMembers);
+                if (!familyEvent || !familyEvent.preset) return null;
+                const p = familyEvent.preset;
 
                 return (
                   <View
@@ -1231,11 +1234,13 @@ export default function CalendarScreen() {
               <View style={styles.modalShiftsList}>
                 {orderedMembers.map((member) => {
                   const isHidden = hiddenMemberIds.includes(member.id);
-                  const key = getShiftMapKey(member.id, selectedDayDetail.dateStr);
-                  const shift = shifts[key];
-                  const preset = shift?.shift_preset_id
-                    ? presets.find((p) => p.id === shift.shift_preset_id)
-                    : null;
+                  const memberShifts = getUserShiftsForDay(shifts, member.id, selectedDayDetail.dateStr);
+                  const presetsWithShifts = memberShifts
+                    .map((s) => ({
+                      shift: s,
+                      preset: s.shift_preset_id ? presets.find((p) => p && p.id === s.shift_preset_id) : null,
+                    }))
+                    .filter((item) => item.preset !== null);
 
                   return (
                     <View key={member.id} style={{ gap: 4, opacity: isHidden ? 0.6 : 1 }}>
@@ -1261,55 +1266,62 @@ export default function CalendarScreen() {
                           </View>
                         </View>
 
-                        {/* Shift Badge or Off */}
-                        {preset ? (
-                          <View style={{ alignItems: 'flex-end', gap: 4 }}>
-                            <View
-                              style={[
-                                styles.modalShiftBadge,
-                                {
-                                  backgroundColor: `${preset.color}20`,
-                                  borderColor: preset.color,
-                                },
-                              ]}
-                            >
-                              <Text style={[styles.modalShiftTitle, { color: preset.color }]}>
-                                {preset.title}
-                              </Text>
-                              {preset.start_time && preset.end_time ? (
-                                <Text style={[styles.modalShiftTimes, { color: ui.textMuted }]}>
-                                  {preset.start_time} – {preset.end_time} ({preset.hours}h)
-                                </Text>
-                              ) : preset.hours !== undefined && preset.hours !== null && preset.hours > 0 ? (
-                                <Text style={[styles.modalShiftTimes, { color: ui.textMuted }]}>
-                                  {preset.hours}h
-                                </Text>
-                              ) : null}
-                            </View>
+                        {/* Shift Badges or Off */}
+                        {presetsWithShifts.length > 0 ? (
+                          <View style={{ alignItems: 'flex-end', gap: 6 }}>
+                            {presetsWithShifts.map(({ shift, preset }, sIdx) => {
+                              if (!preset) return null;
+                              return (
+                                <View key={`m_shift_${preset.id}_${sIdx}`} style={{ alignItems: 'flex-end', gap: 4 }}>
+                                  <View
+                                    style={[
+                                      styles.modalShiftBadge,
+                                      {
+                                        backgroundColor: `${preset.color}20`,
+                                        borderColor: preset.color,
+                                      },
+                                    ]}
+                                  >
+                                    <Text style={[styles.modalShiftTitle, { color: preset.color }]}>
+                                      {preset.title}
+                                    </Text>
+                                    {preset.start_time && preset.end_time ? (
+                                      <Text style={[styles.modalShiftTimes, { color: ui.textMuted }]}>
+                                        {preset.start_time} – {preset.end_time} ({preset.hours}h)
+                                      </Text>
+                                    ) : preset.hours !== undefined && preset.hours !== null && preset.hours > 0 ? (
+                                      <Text style={[styles.modalShiftTimes, { color: ui.textMuted }]}>
+                                        {preset.hours}h
+                                      </Text>
+                                    ) : null}
+                                  </View>
 
-                            {/* Quick Action: Make this shift for the whole family */}
-                            <TouchableOpacity
-                              style={[
-                                styles.modalQuickFamilyBtn,
-                                {
-                                  borderColor: ui.border,
-                                  backgroundColor: isDark ? '#161F33' : '#F1F5F9',
-                                },
-                              ]}
-                              onPress={() =>
-                                handleMakeShiftForWholeFamily(
-                                  preset.id,
-                                  selectedDayDetail.dateStr,
-                                  shift?.note
-                                )
-                              }
-                              activeOpacity={0.7}
-                            >
-                              <Users size={11} color="#8B5CF6" />
-                              <Text style={[styles.modalQuickFamilyBtnText, { color: isDark ? '#C4B5FD' : '#7C3AED' }]}>
-                                Zapsat celé rodině
-                              </Text>
-                            </TouchableOpacity>
+                                  {/* Quick Action: Make this shift for the whole family */}
+                                  <TouchableOpacity
+                                    style={[
+                                      styles.modalQuickFamilyBtn,
+                                      {
+                                        borderColor: ui.border,
+                                        backgroundColor: isDark ? '#161F33' : '#F1F5F9',
+                                      },
+                                    ]}
+                                    onPress={() =>
+                                      handleMakeShiftForWholeFamily(
+                                        preset.id,
+                                        selectedDayDetail.dateStr,
+                                        shift?.note
+                                      )
+                                    }
+                                    activeOpacity={0.7}
+                                  >
+                                    <Users size={11} color="#8B5CF6" />
+                                    <Text style={[styles.modalQuickFamilyBtnText, { color: isDark ? '#C4B5FD' : '#7C3AED' }]}>
+                                      Zapsat celé rodině
+                                    </Text>
+                                  </TouchableOpacity>
+                                </View>
+                              );
+                            })}
                           </View>
                         ) : (
                           <Text style={[styles.noShiftText, { color: ui.textMuted }]}>
@@ -1318,14 +1330,22 @@ export default function CalendarScreen() {
                         )}
                       </View>
 
-                      {/* Display shift note if any */}
-                      {shift?.note && shift.note.trim().length > 0 && (
-                        <View style={[styles.modalNoteBubble, { backgroundColor: isDark ? '#161F33' : '#F1F5F9', borderColor: ui.border }]}>
-                          <FileText size={12} color={ui.accent} />
-                          <Text style={[styles.modalNoteText, { color: ui.text }]}>
-                            {shift.note}
-                          </Text>
-                        </View>
+                      {/* Display shift notes if any */}
+                      {memberShifts.map((s, nIdx) =>
+                        s.note && s.note.trim().length > 0 ? (
+                          <View
+                            key={`m_note_${nIdx}`}
+                            style={[
+                              styles.modalNoteBubble,
+                              { backgroundColor: isDark ? '#161F33' : '#F1F5F9', borderColor: ui.border },
+                            ]}
+                          >
+                            <FileText size={12} color={ui.accent} />
+                            <Text style={[styles.modalNoteText, { color: ui.text }]}>
+                              {s.note}
+                            </Text>
+                          </View>
+                        ) : null
                       )}
                     </View>
                   );

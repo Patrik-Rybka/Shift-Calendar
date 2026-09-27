@@ -4,11 +4,12 @@ export interface ShiftDeleteTarget {
   groupId: string;
   userId: string;
   date: string;
+  presetId?: string | null;
 }
 
 /**
  * Executes batch upsert of shifts into Neon PostgreSQL.
- * Uses ON CONFLICT (group_id, user_id, date) DO UPDATE to guarantee idempotency.
+ * Uses ON CONFLICT (group_id, user_id, date, shift_preset_id) to allow multiple different shift presets / events per person per day.
  */
 export async function batchUpsertShifts(shiftsToUpsert: DbShift[]): Promise<boolean> {
   if (shiftsToUpsert.length === 0) return true;
@@ -36,9 +37,8 @@ export async function batchUpsertShifts(shiftsToUpsert: DbShift[]): Promise<bool
           ${shift.note || null},
           NOW()
         )
-        ON CONFLICT (group_id, user_id, date)
+        ON CONFLICT (group_id, user_id, date, shift_preset_id)
         DO UPDATE SET
-          shift_preset_id = EXCLUDED.shift_preset_id,
           custom_hours = EXCLUDED.custom_hours,
           note = EXCLUDED.note,
           updated_at = NOW();
@@ -60,14 +60,23 @@ export async function batchDeleteShifts(targets: ShiftDeleteTarget[]): Promise<b
   if (targets.length === 0) return true;
 
   try {
-    const deletePromises = targets.map((target) =>
-      sql`
+    const deletePromises = targets.map((target) => {
+      if (target.presetId !== undefined) {
+        return sql`
+          DELETE FROM shifts
+          WHERE group_id = ${target.groupId}
+            AND user_id = ${target.userId}
+            AND date = ${target.date}
+            AND (shift_preset_id = ${target.presetId} OR (shift_preset_id IS NULL AND ${target.presetId} IS NULL));
+        `;
+      }
+      return sql`
         DELETE FROM shifts
         WHERE group_id = ${target.groupId}
           AND user_id = ${target.userId}
           AND date = ${target.date};
-      `
-    );
+      `;
+    });
     await Promise.all(deletePromises);
     return true;
   } catch (error) {

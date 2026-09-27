@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { DbShift, DbShiftPreset } from '../services/db/neonClient';
-import { batchUpsertShifts, batchDeleteShifts, fetchGroupShiftsRange } from '../services/db/syncService';
+import { batchUpsertShifts, batchDeleteShifts, fetchGroupShiftsRange, type ShiftDeleteTarget } from '../services/db/syncService';
 import { formatLocalDate } from '@/utils/calendarUtils';
 import { logger } from '../services/logger';
 
@@ -16,10 +16,25 @@ export interface PendingChange {
 }
 
 /**
- * Key format for fast O(1) lookup in calendar cells: `${userId}_${date}` (date is YYYY-MM-DD)
+ * Key format for fast O(1) lookup in calendar cells: `${userId}_${date}_${presetId}` (date is YYYY-MM-DD)
  */
-export function getShiftMapKey(userId: string, date: string): string {
-  return `${userId}_${date}`;
+export function getShiftMapKey(userId: string, date: string, presetId?: string | null): string {
+  return presetId ? `${userId}_${date}_${presetId}` : `${userId}_${date}_note`;
+}
+
+/**
+ * Returns all shifts for a user on a given date (supporting multiple shifts/events per day).
+ */
+export function getUserShiftsForDay(shifts: Record<string, DbShift> | undefined | null, userId: string, date: string): DbShift[] {
+  if (!shifts) return [];
+  const prefix = `${userId}_${date}`;
+  const result: DbShift[] = [];
+  for (const [key, shift] of Object.entries(shifts)) {
+    if (key.startsWith(prefix) || (shift && shift.user_id === userId && shift.date === date)) {
+      result.push(shift);
+    }
+  }
+  return result;
 }
 
 export interface ShiftState {
@@ -71,7 +86,7 @@ export interface ShiftState {
     customHours?: number | null;
     note?: string | null;
   }) => void;
-  removeShift: (groupId: string, userId: string, date: string) => void;
+  removeShift: (groupId: string, userId: string, date: string, presetId?: string | null) => void;
 
   // Sync with Neon database
   syncWithNeon: (groupId: string) => Promise<boolean>;
@@ -118,7 +133,7 @@ export const useShiftStore = create<ShiftState>()(
               ? shift.date.split('T')[0] 
               : new Date(shift.date).toISOString().split('T')[0];
             
-            const key = getShiftMapKey(shift.user_id, dateStr);
+            const key = getShiftMapKey(shift.user_id, dateStr, shift.shift_preset_id);
             shiftMap[key] = {
               ...shift,
               date: dateStr,
@@ -168,7 +183,7 @@ export const useShiftStore = create<ShiftState>()(
       discardPendingChanges: () => set({ pendingChanges: {}, syncStatus: 'synced' }),
 
       applyShift: ({ groupId, userId, date, presetId, customHours, note }) => {
-        const key = getShiftMapKey(userId, date);
+        const key = getShiftMapKey(userId, date, presetId);
         const existing = get().shifts[key];
 
         const updatedShift: DbShift = {
@@ -199,35 +214,48 @@ export const useShiftStore = create<ShiftState>()(
         }));
       },
 
-      removeShift: (groupId, userId, date) => {
-        const key = getShiftMapKey(userId, date);
-        const existing = get().shifts[key];
-
-        const dummyShift: DbShift = existing || {
-          id: `del_${Date.now()}`,
-          group_id: groupId,
-          user_id: userId,
-          date,
-          shift_preset_id: null,
-          custom_hours: null,
-          note: null,
-          updated_at: new Date().toISOString(),
-        };
-
+      removeShift: (groupId, userId, date, presetId) => {
         set((state) => {
           const nextShifts = { ...state.shifts };
-          delete nextShifts[key];
+          const nextPending = { ...state.pendingChanges };
+
+          if (presetId !== undefined) {
+            const key = getShiftMapKey(userId, date, presetId);
+            const existing = nextShifts[key];
+            delete nextShifts[key];
+
+            const dummyShift: DbShift = existing || {
+              id: `del_${Date.now()}`,
+              group_id: groupId,
+              user_id: userId,
+              date,
+              shift_preset_id: presetId,
+              custom_hours: null,
+              note: null,
+              updated_at: new Date().toISOString(),
+            };
+            nextPending[key] = {
+              action: 'delete',
+              shift: dummyShift,
+              timestamp: Date.now(),
+            };
+          } else {
+            const prefix = `${userId}_${date}`;
+            for (const [k, shift] of Object.entries(state.shifts)) {
+              if (k.startsWith(prefix) || (shift && shift.user_id === userId && shift.date === date)) {
+                delete nextShifts[k];
+                nextPending[k] = {
+                  action: 'delete',
+                  shift,
+                  timestamp: Date.now(),
+                };
+              }
+            }
+          }
 
           return {
             shifts: nextShifts,
-            pendingChanges: {
-              ...state.pendingChanges,
-              [key]: {
-                action: 'delete',
-                shift: dummyShift,
-                timestamp: Date.now(),
-              },
-            },
+            pendingChanges: nextPending,
             syncStatus: 'pending',
           };
         });
@@ -243,12 +271,13 @@ export const useShiftStore = create<ShiftState>()(
           const upserts = pendingList
             .filter((p) => p.action === 'upsert')
             .map((p) => p.shift);
-          const deletes = pendingList
+          const deletes: ShiftDeleteTarget[] = pendingList
             .filter((p) => p.action === 'delete')
             .map((p) => ({
               groupId: p.shift.group_id,
               userId: p.shift.user_id,
               date: typeof p.shift.date === 'string' ? p.shift.date.split('T')[0] : p.shift.date,
+              presetId: p.shift.shift_preset_id,
             }));
 
           if (upserts.length > 0 || deletes.length > 0) {
