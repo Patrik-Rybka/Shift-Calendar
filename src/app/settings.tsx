@@ -12,6 +12,7 @@ import {
   Platform,
   KeyboardAvoidingView,
   Switch,
+  Linking,
 } from 'react-native';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -57,9 +58,13 @@ import {
   Info,
   LogOut,
   RefreshCw,
+  Terminal,
+  Activity,
+  ShieldAlert,
 } from 'lucide-react-native';
 
 import { UpdateModal } from '@/components/common/UpdateModal';
+import DiagnosticModal from '@/components/admin/DiagnosticModal';
 import {
   checkForUpdate,
   getCurrentAppVersion,
@@ -202,6 +207,7 @@ export default function SettingsScreen() {
   }, [groupMembers, memberOrderIds]);
 
   const isAdmin = currentUser?.role === 'admin';
+  const [diagnosticModalVisible, setDiagnosticModalVisible] = useState(false);
 
   // ─── Section 7.1: Preset Modal State ────────────────────────────────────────
   const [modalVisible, setModalVisible] = useState(false);
@@ -1088,6 +1094,54 @@ export default function SettingsScreen() {
                       thumbColor="#FFFFFF"
                     />
                   )}
+                </View>
+              </View>
+
+              {/* ── 7.3D: Systémová diagnostika & terminál logů ── */}
+              <View style={styles.subsection}>
+                <View style={styles.subsectionHeader}>
+                  <Terminal size={15} color="#38BDF8" />
+                  <Text style={[styles.subsectionTitle, { color: '#38BDF8' }]}>
+                    Diagnostika a systémové logy
+                  </Text>
+                </View>
+
+                <View style={[styles.securityCard, { backgroundColor: ui.card, borderColor: ui.border }]}>
+                  <View style={{ gap: 12 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                      <View style={[styles.sectionIconCircle, { backgroundColor: 'rgba(56, 189, 248, 0.14)', width: 38, height: 38, borderRadius: 19 }]}>
+                        <Activity size={18} color="#38BDF8" />
+                      </View>
+                      <View style={{ flex: 1, gap: 2 }}>
+                        <Text style={[styles.securityRowTitle, { color: ui.text }]}>Konzole a záznamník chyb</Text>
+                        <Text style={[styles.securityRowSubtitle, { color: ui.textMuted }]}>
+                          Živé systémové logy, odezva Neon DB, inspekce paměti a kopírování reportu pro řešení problémů.
+                        </Text>
+                      </View>
+                    </View>
+
+                    <TouchableOpacity
+                      style={{
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: 8,
+                        backgroundColor: isDark ? 'rgba(56, 189, 248, 0.12)' : '#EFF6FF',
+                        borderWidth: 1,
+                        borderColor: isDark ? 'rgba(56, 189, 248, 0.35)' : '#BFDBFE',
+                        paddingVertical: 12,
+                        paddingHorizontal: 16,
+                        borderRadius: 12,
+                      }}
+                      onPress={() => setDiagnosticModalVisible(true)}
+                      activeOpacity={0.8}
+                    >
+                      <Terminal size={16} color="#38BDF8" />
+                      <Text style={{ color: '#38BDF8', fontSize: 14, fontWeight: '700' }}>
+                        Otevřít diagnostickou konzoli
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
                 </View>
               </View>
             </View>
@@ -2063,6 +2117,50 @@ export default function SettingsScreen() {
               </View>
             </View>
 
+            {/* 2B. Optimalizace baterie (proti uspávání na Samsungu a Androidu) */}
+            <View style={[styles.prefCard, { backgroundColor: ui.card, borderColor: ui.border }]}>
+              <View style={{ gap: 10 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                  <View style={[styles.sectionIconCircle, { backgroundColor: 'rgba(245,158,11,0.14)', width: 34, height: 34, borderRadius: 17 }]}>
+                    <ShieldAlert size={16} color={ui.warningText} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.prefTitle, { color: ui.text }]}>Baterie a spánek aplikace</Text>
+                    <Text style={[styles.prefSubtitle, { color: ui.textMuted }]}>
+                      Zejména na telefonech Samsung může systém aplikaci po čase uspat.
+                    </Text>
+                  </View>
+                </View>
+                <Text style={{ fontSize: 12.5, lineHeight: 18, color: ui.textMuted }}>
+                  Pokud se vám směny po delší nečinnosti neaktualizují, otevřete systémové nastavení a u položky <Text style={{ fontWeight: '700', color: ui.text }}>Baterie</Text> nastavte <Text style={{ fontWeight: '700', color: '#10B981' }}>Neomezeno</Text>.
+                </Text>
+                <TouchableOpacity
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 6,
+                    paddingVertical: 10,
+                    borderRadius: 10,
+                    backgroundColor: isDark ? 'rgba(245,158,11,0.1)' : '#FEF3C7',
+                    borderWidth: 1,
+                    borderColor: isDark ? 'rgba(245,158,11,0.25)' : '#FDE68A',
+                  }}
+                  onPress={() => {
+                    Linking.openSettings().catch(() => {
+                      Alert.alert('Nastavení', 'Otevřete Nastavení telefonu -> Aplikace -> Kalendář směn -> Baterie.');
+                    });
+                  }}
+                  activeOpacity={0.75}
+                >
+                  <Settings size={14} color={ui.warningText} />
+                  <Text style={{ fontSize: 13, fontWeight: '700', color: ui.warningText }}>
+                    Otevřít systémové nastavení baterie
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+
             {/* 3. Správa relace: Opustit skupinu & Odhlásit se */}
             <View style={[styles.dangerCard, { backgroundColor: isDark ? 'rgba(239, 68, 68, 0.06)' : '#FEF2F2', borderColor: isDark ? 'rgba(239, 68, 68, 0.25)' : '#FCA5A5' }]}>
               <View style={{ gap: 3, marginBottom: 8 }}>
@@ -2398,6 +2496,14 @@ export default function SettingsScreen() {
         release={availableRelease}
         currentVersion={getCurrentAppVersion()}
         onClose={() => setUpdateModalVisible(false)}
+      />
+
+      {/* ═════════════════════════════════════════════════════════════════
+           MODAL 8.2 — Administrátorská diagnostická konzole
+      ═════════════════════════════════════════════════════════════════ */}
+      <DiagnosticModal
+        visible={diagnosticModalVisible}
+        onClose={() => setDiagnosticModalVisible(false)}
       />
     </SafeAreaView>
   );

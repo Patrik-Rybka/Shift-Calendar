@@ -77,13 +77,15 @@ export default function CalendarHeader({ onSave }: CalendarHeaderProps) {
     badgeBg: isDark ? '#161F33' : '#F1F5F9',
   };
 
-  const monthName = CZECH_MONTHS[currentMonth.getMonth()];
-  const year = currentMonth.getFullYear();
+  const safeMonth = currentMonth instanceof Date && !isNaN(currentMonth.getTime()) ? currentMonth : new Date(currentMonth || Date.now());
+  const validMonth = isNaN(safeMonth.getTime()) ? new Date() : safeMonth;
+  const monthName = CZECH_MONTHS[validMonth.getMonth()] || CZECH_MONTHS[0];
+  const year = validMonth.getFullYear();
 
   const now = new Date();
   const isCurrentMonthNow =
-    now.getMonth() === currentMonth.getMonth() &&
-    now.getFullYear() === currentMonth.getFullYear();
+    now.getMonth() === validMonth.getMonth() &&
+    now.getFullYear() === validMonth.getFullYear();
 
   const handleCopyCode = async () => {
     if (!currentGroup?.join_code) return;

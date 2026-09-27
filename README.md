@@ -8,7 +8,7 @@
   <br/>
 
   <p>
-    <a href="https://github.com/Patrik-Rybka/Shift-Calendar/releases/latest/download/kalendar-smen.apk">
+    <a href="https://github.com/Patrik-Rybka/Shift-Calendar/releases/download/v1.0.7/kalendar-smen-v1.0.7.apk">
       <img src="assets/images/btn-download-apk.svg" height="54" alt="Stáhnout APK pro Android" />
     </a>
     &nbsp;&nbsp;
@@ -56,8 +56,8 @@
 
 ## 📲 Jak nainstalovat aplikaci do telefonu
 
-1. V telefonu klikněte na **[Stáhnout nejnovější APK](https://github.com/Patrik-Rybka/Shift-Calendar/releases/latest/download/kalendar-smen.apk)**.
-2. V notifikační liště nebo ve složce *Stažené soubory* klepněte na stažený soubor `kalendar-smen.apk`.
+1. V telefonu klikněte na **[Stáhnout nejnovější balíček APK (v1.0.7)](https://github.com/Patrik-Rybka/Shift-Calendar/releases/download/v1.0.7/kalendar-smen-v1.0.7.apk)** (nebo přejděte na [Seznam všech verzí](https://github.com/Patrik-Rybka/Shift-Calendar/releases/latest)).
+2. V notifikační liště nebo ve složce *Stažené soubory* klepněte na stažený soubor `kalendar-smen-v1.0.7.apk`.
 3. Pokud se zobrazí dotaz na *Povolení instalace z neznámých zdrojů* (např. Chrome), potvrďte povolení.
 4. Zvolte **Instalovat** a poté aplikaci otevřete.
 5. Zadejte kód vaší rodinné skupiny a kalendář je připraven!

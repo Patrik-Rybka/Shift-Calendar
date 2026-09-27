@@ -44,22 +44,26 @@ import AddMemberModal from '@/components/calendar/AddMemberModal';
 import { getCurrentAppVersion } from '@/services/updateService';
 
 function formatCzechDateFull(dateStr: string): string {
-  const [y, m, d] = dateStr.split('-').map(Number);
+  if (!dateStr || typeof dateStr !== 'string') return '';
+  const parts = dateStr.split('-').map(Number);
+  if (parts.length < 3 || parts.some(isNaN)) return dateStr;
+  const [y, m, d] = parts;
   const dateObj = new Date(y, m - 1, d);
+  if (isNaN(dateObj.getTime())) return dateStr;
   const daysCs = ['Neděle', 'Pondělí', 'Úterý', 'Středa', 'Čtvrtek', 'Pátek', 'Sobota'];
   const monthsCs = [
     'ledna', 'února', 'března', 'dubna', 'května', 'června',
     'července', 'srpna', 'září', 'října', 'listopadu', 'prosince',
   ];
-  const dayName = daysCs[dateObj.getDay()];
-  return `${dayName}, ${d}. ${monthsCs[m - 1]} ${y}`;
+  const dayName = daysCs[dateObj.getDay()] || '';
+  return `${dayName}, ${d}. ${monthsCs[m - 1] || ''} ${y}`;
 }
 
 export default function CalendarScreen() {
   const router = useRouter();
   const isDark = useColorScheme() === 'dark';
 
-  const { currentUser, currentGroup, groupMembers, setGroupMembers } = useAuthStore();
+  const { currentUser, currentGroup, groupMembers, setGroupMembers, isHydrated } = useAuthStore();
   const {
     cellStyle,
     hiddenMemberIds,
@@ -113,14 +117,16 @@ export default function CalendarScreen() {
     modalOverlay: 'rgba(0, 0, 0, 0.65)',
   };
 
-  // Auth gatekeeper
+  // Auth gatekeeper - ONLY runs after AsyncStorage has completely hydrated!
   useEffect(() => {
+    if (!isHydrated) return;
+
     if (!currentUser) {
       router.replace('/welcome');
     } else if (!currentGroup || currentUser.status === 'pending') {
       router.replace('/group-choice' as any);
     }
-  }, [currentUser, currentGroup]);
+  }, [isHydrated, currentUser, currentGroup]);
 
   // Load presets & sync initial shifts
   useEffect(() => {
@@ -171,7 +177,7 @@ export default function CalendarScreen() {
     }
   }, [currentGroup?.id, currentMonth]);
 
-  if (!currentUser || !currentGroup) {
+  if (!isHydrated || !currentUser || !currentGroup) {
     return (
       <View style={[styles.loadingCenter, { backgroundColor: ui.bg }]}>
         <ActivityIndicator size="large" color={ui.accent} />
@@ -179,12 +185,13 @@ export default function CalendarScreen() {
     );
   }
 
-  // 7.4C: Ordered and filtered members
+  // 7.4C: Ordered and filtered members (guaranteed safe against nulls and corrupt arrays)
   const orderedMembers = React.useMemo(() => {
-    if (!groupMembers || groupMembers.length === 0) return [];
-    if (!memberOrderIds || memberOrderIds.length === 0) return groupMembers;
+    if (!groupMembers || !Array.isArray(groupMembers) || groupMembers.length === 0) return [];
+    const validMembers = groupMembers.filter((m) => Boolean(m && m.id));
+    if (!memberOrderIds || !Array.isArray(memberOrderIds) || memberOrderIds.length === 0) return validMembers;
 
-    return [...groupMembers].sort((a, b) => {
+    return [...validMembers].sort((a, b) => {
       const idxA = memberOrderIds.indexOf(a.id);
       const idxB = memberOrderIds.indexOf(b.id);
       const sortA = idxA === -1 ? 9999 : idxA;
@@ -204,16 +211,21 @@ export default function CalendarScreen() {
       title: string;
     }> = [];
 
+    const safeHidden = Array.isArray(hiddenMemberIds) ? hiddenMemberIds : [];
+    const safeShifts = shifts || {};
+    const safePresets = Array.isArray(presets) ? presets : [];
+
     for (const member of orderedMembers) {
+      if (!member || !member.id) continue;
       // Step 7.4C: Skip if member is hidden from calendar view
-      if (hiddenMemberIds.includes(member.id)) {
+      if (safeHidden.includes(member.id)) {
         continue;
       }
 
       const key = getShiftMapKey(member.id, day.dateStr);
-      const shift = shifts[key];
-      if (shift && (shift.shift_preset_id || (shift.note && shift.note.trim().length > 0))) {
-        const preset = shift.shift_preset_id ? presets.find((p) => p.id === shift.shift_preset_id) : undefined;
+      const shift = safeShifts[key];
+      if (shift && (shift.shift_preset_id || (typeof shift.note === 'string' && shift.note.trim().length > 0))) {
+        const preset = shift.shift_preset_id ? safePresets.find((p) => p && p.id === shift.shift_preset_id) : undefined;
         const color = preset?.color || member.color || '#2563EB';
         const title = preset?.title || preset?.short_code || shift.note || 'Poznámka';
         list.push({
@@ -732,8 +744,9 @@ export default function CalendarScreen() {
     setEditMode(false);
 
     try {
-      const year = currentMonth.getFullYear();
-      const month = currentMonth.getMonth();
+      const safeMonth = currentMonth instanceof Date && !isNaN(currentMonth.getTime()) ? currentMonth : new Date();
+      const year = safeMonth.getFullYear();
+      const month = safeMonth.getMonth();
       const startDate = formatLocalDate(year, month - 1, 20);
       const endDate = formatLocalDate(year, month + 2, 10);
       const remoteShifts = await fetchGroupShiftsRange(currentGroup.id, startDate, endDate);
@@ -797,11 +810,11 @@ export default function CalendarScreen() {
               <View style={styles.summaryTitleLeft}>
                 <Users size={16} color={ui.accent} />
                 <Text style={[styles.summaryTitle, { color: ui.text }]}>
-                  Rodina ({groupMembers.length})
+                  Rodina ({Array.isArray(groupMembers) ? groupMembers.length : 0})
                 </Text>
               </View>
               <View style={styles.summaryActionsRight}>
-                {hiddenMemberIds.length > 0 && (
+                {Array.isArray(hiddenMemberIds) && hiddenMemberIds.length > 0 && (
                   <TouchableOpacity
                     style={[styles.showAllBtnSmall, { borderColor: ui.border, backgroundColor: isDark ? '#161F33' : '#F1F5F9' }]}
                     onPress={setAllMembersVisible}
@@ -826,7 +839,11 @@ export default function CalendarScreen() {
 
             <View style={styles.membersListRow}>
               {orderedMembers.map((member) => {
-                const isHidden = hiddenMemberIds.includes(member.id);
+                if (!member || !member.id) return null;
+                const isHidden = Array.isArray(hiddenMemberIds) && hiddenMemberIds.includes(member.id);
+                const displayName = member.display_name || 'Člen';
+                const initialChar = displayName.trim().charAt(0).toUpperCase() || '?';
+
                 return (
                   <TouchableOpacity
                     key={member.id}
@@ -841,9 +858,9 @@ export default function CalendarScreen() {
                     onPress={() => toggleMemberVisibility(member.id)}
                     activeOpacity={0.7}
                   >
-                    <View style={[styles.legendAvatarCircle, { backgroundColor: isHidden ? '#64748B' : member.color }]}>
+                    <View style={[styles.legendAvatarCircle, { backgroundColor: isHidden ? '#64748B' : (member.color || '#2563EB') }]}>
                       <Text style={styles.legendAvatarText}>
-                        {member.display_name.charAt(0).toUpperCase()}
+                        {initialChar}
                       </Text>
                     </View>
                     <Text
@@ -855,7 +872,7 @@ export default function CalendarScreen() {
                         },
                       ]}
                     >
-                      {member.display_name} {member.id === currentUser?.id && '(Já)'}
+                      {displayName} {member.id === currentUser?.id && '(Já)'}
                     </Text>
                     {member.role === 'admin' && (
                       <Crown size={12} color={isHidden ? ui.textMuted : '#F59E0B'} />

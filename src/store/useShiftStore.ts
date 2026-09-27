@@ -4,6 +4,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { DbShift, DbShiftPreset } from '../services/db/neonClient';
 import { batchUpsertShifts, batchDeleteShifts, fetchGroupShiftsRange } from '../services/db/syncService';
 import { formatLocalDate } from '@/utils/calendarUtils';
+import { logger } from '../services/logger';
 
 export type EditSubMode = 'stamp' | 'range';
 export type SyncStatus = 'synced' | 'syncing' | 'offline' | 'pending' | 'error';
@@ -112,16 +113,21 @@ export const useShiftStore = create<ShiftState>()(
         set({ shifts: shiftMap });
       },
 
-      setCurrentMonth: (date) => set({ currentMonth: date }),
+      setCurrentMonth: (date) => {
+        const safe = date instanceof Date && !isNaN(date.getTime()) ? date : new Date(date);
+        set({ currentMonth: isNaN(safe.getTime()) ? new Date(new Date().getFullYear(), new Date().getMonth(), 1) : safe });
+      },
 
       nextMonth: () => {
-        const current = get().currentMonth;
+        const raw = get().currentMonth;
+        const current = raw instanceof Date && !isNaN(raw.getTime()) ? raw : new Date();
         const next = new Date(current.getFullYear(), current.getMonth() + 1, 1);
         set({ currentMonth: next });
       },
 
       prevMonth: () => {
-        const current = get().currentMonth;
+        const raw = get().currentMonth;
+        const current = raw instanceof Date && !isNaN(raw.getTime()) ? raw : new Date();
         const prev = new Date(current.getFullYear(), current.getMonth() - 1, 1);
         set({ currentMonth: prev });
       },
@@ -230,6 +236,10 @@ export const useShiftStore = create<ShiftState>()(
               date: typeof p.shift.date === 'string' ? p.shift.date.split('T')[0] : p.shift.date,
             }));
 
+          if (upserts.length > 0 || deletes.length > 0) {
+            logger.info('SYNC', `Odesílám lokální změny: ${upserts.length} uložení, ${deletes.length} smazání.`);
+          }
+
           if (upserts.length > 0) {
             const ok = await batchUpsertShifts(upserts);
             if (!ok) throw new Error('Batch upsert failed');
@@ -244,8 +254,10 @@ export const useShiftStore = create<ShiftState>()(
           set({ pendingChanges: {} });
 
           // 2. Fetch fresh shifts for visible month (with 7 days padding before and after)
-          const year = currentMonth.getFullYear();
-          const month = currentMonth.getMonth(); // 0-indexed
+          const rawM = currentMonth;
+          const safeM = rawM instanceof Date && !isNaN(rawM.getTime()) ? rawM : new Date();
+          const year = safeM.getFullYear();
+          const month = safeM.getMonth(); // 0-indexed
           const startDate = formatLocalDate(year, month - 1, 20);
           const endDate = formatLocalDate(year, month + 2, 10);
 
@@ -257,9 +269,10 @@ export const useShiftStore = create<ShiftState>()(
             syncStatus: 'synced',
             lastSyncedAt: now,
           });
+          logger.success('SYNC', `Synchronizováno ${remoteShifts.length} směn s Neon DB.`);
           return true;
         } catch (error) {
-          console.warn('Sync failed (likely offline):', error);
+          logger.warn('SYNC', 'Synchronizace selhala (offline režim)', error);
           set({ syncStatus: 'offline' });
           return false;
         }

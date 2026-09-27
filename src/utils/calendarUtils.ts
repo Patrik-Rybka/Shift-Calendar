@@ -137,12 +137,14 @@ export function getDatesBetween(startDateStr: string, endDateStr: string): strin
  * Supports configurable first day of week ('monday' or 'sunday') and holiday detection.
  */
 export function generateMonthDays(
-  viewDate: Date,
+  viewDate: Date | string,
   firstDayOfWeek: 'monday' | 'sunday' = 'monday',
   showHolidays: boolean = true
 ): CalendarDay[] {
-  const year = viewDate.getFullYear();
-  const month = viewDate.getMonth(); // 0-indexed
+  const safeDate = viewDate instanceof Date && !isNaN(viewDate.getTime()) ? viewDate : new Date(viewDate || Date.now());
+  const validDate = isNaN(safeDate.getTime()) ? new Date() : safeDate;
+  const year = validDate.getFullYear();
+  const month = validDate.getMonth(); // 0-indexed
 
   const today = new Date();
   const todayStr = formatLocalDate(today.getFullYear(), today.getMonth(), today.getDate());
@@ -228,11 +230,13 @@ export function generateMonthDays(
  * Guarantees zero column-wrapping bugs on mobile screens.
  */
 export function generateWeeks(
-  viewDate: Date,
+  viewDate: Date | string,
   firstDayOfWeek: 'monday' | 'sunday' = 'monday',
   showHolidays: boolean = true
 ): CalendarDay[][] {
-  const allDays = generateMonthDays(viewDate, firstDayOfWeek, showHolidays);
+  const safeDate = viewDate instanceof Date && !isNaN(viewDate.getTime()) ? viewDate : new Date(viewDate || Date.now());
+  const validDate = isNaN(safeDate.getTime()) ? new Date() : safeDate;
+  const allDays = generateMonthDays(validDate, firstDayOfWeek, showHolidays);
   const weeks: CalendarDay[][] = [];
   for (let i = 0; i < allDays.length; i += 7) {
     weeks.push(allDays.slice(i, i + 7));

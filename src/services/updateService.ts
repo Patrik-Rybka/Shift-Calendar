@@ -38,10 +38,10 @@ export interface CheckUpdateResult {
 }
 
 /**
- * Zjistí aktuální verzi nainstalované aplikace (např. "1.0.6")
+ * Zjistí aktuální verzi nainstalované aplikace (např. "1.0.7")
  */
 export function getCurrentAppVersion(): string {
-  return Constants.expoConfig?.version || '1.0.6';
+  return Constants.expoConfig?.version || '1.0.7';
 }
 
 /**

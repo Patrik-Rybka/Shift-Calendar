@@ -62,7 +62,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: kalendar-smen-apk
-          path: build-output/
+          path: build-output/kalendar-smen-v*.apk
 
       - name: 🚀 Automatické připojení k GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')

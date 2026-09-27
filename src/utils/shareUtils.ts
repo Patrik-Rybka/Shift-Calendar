@@ -1,7 +1,15 @@
 import { Share } from 'react-native';
+import Constants from 'expo-constants';
 
+export const APP_VERSION = Constants.expoConfig?.version || '1.0.7';
+
+// Přímý odkaz ke stažení pojmenovaného balíčku s verzí (např. kalendar-smen-v1.0.7.apk)
 export const LATEST_RELEASE_APK_URL =
-  'https://github.com/Patrik-Rybka/Shift-Calendar/releases/latest/download/kalendar-smen.apk';
+  `https://github.com/Patrik-Rybka/Shift-Calendar/releases/download/v${APP_VERSION}/kalendar-smen-v${APP_VERSION}.apk`;
+
+// Odkaz na oficiální stránku se všemi verzemi
+export const GITHUB_RELEASES_PAGE_URL =
+  'https://github.com/Patrik-Rybka/Shift-Calendar/releases/latest';
 
 export interface GroupInviteOptions {
   groupName: string;
@@ -25,7 +33,8 @@ export function formatGroupInviteMessage(options: GroupInviteOptions): string {
   }
 
   msg += `📲 Nemáš ještě aplikaci v telefonu?\n`;
-  msg += `Stáhni si ji jedním klikem zde:\n${LATEST_RELEASE_APK_URL}\n\n`;
+  msg += `Stáhni si balíček verze v${APP_VERSION} přímo zde:\n${LATEST_RELEASE_APK_URL}\n\n`;
+  msg += `(Seznam všech verzí a novinek: ${GITHUB_RELEASES_PAGE_URL})\n\n`;
   msg += `(Pokud už aplikaci máš, stačí ji otevřít, zadat kód výše a jsi s námi propojen/a!)`;
 
   if (requireApproval) {
