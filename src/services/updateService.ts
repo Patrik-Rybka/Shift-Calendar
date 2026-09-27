@@ -40,7 +40,7 @@ export interface CheckUpdateResult {
  * Zjistí aktuální verzi nainstalované aplikace (např. "1.0.0")
  */
 export function getCurrentAppVersion(): string {
-  return Constants.expoConfig?.version || '1.0.4';
+  return Constants.expoConfig?.version || '1.0.5';
 }
 
 /**
@@ -238,10 +238,14 @@ export async function triggerApkInstall(localFileUri: string, fallbackUrl?: stri
       // Převedeme file:// URI na content:// URI s využitím FileProvideru Expo
       const contentUri = await FileSystem.getContentUriAsync(localFileUri);
 
+      // FLAG_GRANT_READ_URI_PERMISSION = 1 (0x1)
+      // FLAG_ACTIVITY_NEW_TASK = 268435456 (0x10000000)
+      const installFlags = 1 | 268435456;
+
       // Spustíme standardní Android VIEW Intent pro instalaci APK
       await IntentLauncher.startActivityAsync('android.intent.action.VIEW', {
         data: contentUri,
-        flags: 1, // FLAG_GRANT_READ_URI_PERMISSION
+        flags: installFlags,
         type: 'application/vnd.android.package-archive',
       });
       return;
@@ -250,15 +254,18 @@ export async function triggerApkInstall(localFileUri: string, fallbackUrl?: stri
       // Pokud přímé spuštění selže (např. chybějící oprávnění nebo systémové omezení),
       // nabídneme otevření v prohlížeči
       if (fallbackUrl) {
-        await Linking.openURL(fallbackUrl);
+        try {
+          await Linking.openURL(fallbackUrl);
+        } catch {}
         return;
       }
-      throw error;
     }
   } else {
     // Pro web / iOS / jiné platformy otevřeme odkaz
     if (fallbackUrl) {
-      await Linking.openURL(fallbackUrl);
+      try {
+        await Linking.openURL(fallbackUrl);
+      } catch {}
     }
   }
 }

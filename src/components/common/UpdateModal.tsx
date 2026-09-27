@@ -3,10 +3,9 @@ import {
   View,
   Text,
   StyleSheet,
-  Modal,
   TouchableOpacity,
   ScrollView,
-  ActivityIndicator,
+  BackHandler,
   Platform,
   Alert,
 } from 'react-native';
@@ -15,10 +14,8 @@ import {
   Download,
   ExternalLink,
   X,
-  CheckCircle2,
   AlertCircle,
   PackageCheck,
-  RefreshCw,
 } from 'lucide-react-native';
 import * as Linking from 'expo-linking';
 import { useColorScheme } from '@/hooks/use-color-scheme';
@@ -66,10 +63,28 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({
     }
   }, [visible]);
 
+  // Obsluha systémového tlačítka "Zpět" na Androidu (náhrada za onRequestClose v Modal)
+  useEffect(() => {
+    if (!visible) return;
+
+    const onBackPress = () => {
+      if (isDownloading) {
+        cancelApkDownload().catch(() => {});
+        setIsDownloading(false);
+      } else {
+        onClose();
+      }
+      return true; // Zabrání výchozímu opuštění obrazovky
+    };
+
+    const backSub = BackHandler.addEventListener('hardwareBackPress', onBackPress);
+    return () => backSub.remove();
+  }, [visible, isDownloading, onClose]);
+
   if (!visible || !release) return null;
 
-  const formatBytes = (bytes: number): string => {
-    if (bytes <= 0) return '0 MB';
+  const formatBytes = (bytes?: number | null): string => {
+    if (!bytes || typeof bytes !== 'number' || isNaN(bytes) || bytes <= 0) return '0 MB';
     const mb = bytes / (1024 * 1024);
     return `${mb.toFixed(1)} MB`;
   };
@@ -77,7 +92,9 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({
   const handleStartDownload = async () => {
     if (!release.apkDownloadUrl) {
       // Pokud release nemá přímé APK v přílohách, otevřeme stránku vydání na GitHubu
-      Linking.openURL(release.htmlUrl);
+      if (release.htmlUrl) {
+        Linking.openURL(release.htmlUrl);
+      }
       return;
     }
 
@@ -106,7 +123,7 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({
     } catch (err: any) {
       setIsDownloading(false);
       setErrorMessage(
-        err.message || 'Během stahování aktualizace došlo k chybě. Zkuste to prosím znovu.'
+        err?.message || 'Během stahování aktualizace došlo k chybě. Zkuste to prosím znovu.'
       );
     }
   };
@@ -127,13 +144,15 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({
       setIsInstalling(true);
       await triggerApkInstall(downloadedUri, release.apkDownloadUrl);
     } catch (err: any) {
-      Alert.alert('Chyba při instalaci', err.message || 'Nepodařilo se spustit instalátor.');
+      Alert.alert('Chyba při instalaci', err?.message || 'Nepodařilo se spustit instalátor.');
     }
   };
 
   const handleOpenBrowser = () => {
     const url = release.apkDownloadUrl || release.htmlUrl;
-    Linking.openURL(url);
+    if (url) {
+      Linking.openURL(url);
+    }
   };
 
   // Barvy vzhledu
@@ -142,206 +161,231 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({
   const textSecondary = isDark ? '#94A3B8' : '#64748B';
   const borderColor = isDark ? '#334155' : '#E2E8F0';
   const codeBoxBg = isDark ? '#0F172A' : '#F1F5F9';
+  const percentInt = Math.min(100, Math.max(0, Math.round((downloadProgress || 0) * 100)));
 
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={handleCancel}>
-      <View style={styles.overlay}>
-        <View style={[styles.modalCard, { backgroundColor: bgCard, borderColor }]}>
-          {/* Zavírací křížek v rohu */}
-          {!isDownloading && (
-            <TouchableOpacity style={styles.closeBtn} onPress={onClose} activeOpacity={0.7}>
-              <X size={20} color={textSecondary} />
-            </TouchableOpacity>
-          )}
+    <View style={styles.overlayContainer} pointerEvents="box-none">
+      {/* Tmavé pozadí přes celou obrazovku */}
+      <TouchableOpacity
+        style={styles.backdrop}
+        activeOpacity={1}
+        onPress={!isDownloading ? onClose : undefined}
+      />
 
-          {/* Záhlaví s ikonou */}
-          <View style={styles.header}>
-            <View style={styles.iconCircle}>
-              <Sparkles size={28} color="#3B82F6" />
-            </View>
-            <Text style={[styles.title, { color: textPrimary }]}>
-              {downloadedUri ? 'Aktualizace je připravena!' : 'Nová verze je k dispozici!'}
-            </Text>
+      {/* Vlastní karta aktualizace */}
+      <View style={[styles.modalCard, { backgroundColor: bgCard, borderColor }]}>
+        {/* Zavírací křížek v rohu */}
+        {!isDownloading && (
+          <TouchableOpacity style={styles.closeBtn} onPress={onClose} activeOpacity={0.7}>
+            <X size={20} color={textSecondary} />
+          </TouchableOpacity>
+        )}
 
-            {/* Verze badge */}
-            <View style={styles.versionBadgeRow}>
-              <View style={[styles.badge, { backgroundColor: isDark ? '#334155' : '#E2E8F0' }]}>
-                <Text style={[styles.badgeText, { color: textSecondary }]}>
-                  Nyní: v{currentVersion}
-                </Text>
-              </View>
-              <Text style={{ color: '#3B82F6', fontWeight: 'bold' }}>➔</Text>
-              <View style={[styles.badge, { backgroundColor: '#3B82F6' }]}>
-                <Text style={[styles.badgeText, { color: '#FFFFFF', fontWeight: 'bold' }]}>
-                  Nová: v{release.version}
-                </Text>
-              </View>
-            </View>
+        {/* Záhlaví s ikonou */}
+        <View style={styles.header}>
+          <View style={styles.iconCircle}>
+            <Sparkles size={28} color="#3B82F6" />
           </View>
+          <Text style={[styles.title, { color: textPrimary }]}>
+            {downloadedUri ? 'Aktualizace je připravena!' : 'Nová verze je k dispozici!'}
+          </Text>
 
-          {/* Chybová hláška */}
-          {errorMessage && (
-            <View style={styles.errorBox}>
-              <AlertCircle size={18} color="#EF4444" style={{ marginRight: 8 }} />
-              <Text style={styles.errorText}>{errorMessage}</Text>
-            </View>
-          )}
-
-          {/* Obsah - buď průběh stahování, nebo informace o vydání */}
-          {isDownloading ? (
-            <View style={styles.progressContainer}>
-              <Text style={[styles.progressTitle, { color: textPrimary }]}>
-                Stahuji nový balíček aplikace...
-              </Text>
-
-              {/* Progress bar */}
-              <View style={[styles.progressBarBg, { backgroundColor: isDark ? '#334155' : '#E2E8F0' }]}>
-                <View
-                  style={[
-                    styles.progressBarFill,
-                    { width: `${Math.round(downloadProgress * 100)}%` },
-                  ]}
-                />
-              </View>
-
-              {/* Procenta a MB */}
-              <View style={styles.progressStatsRow}>
-                <Text style={[styles.progressPercent, { color: '#3B82F6' }]}>
-                  {Math.round(downloadProgress * 100)} %
-                </Text>
-                <Text style={[styles.progressBytes, { color: textSecondary }]}>
-                  {formatBytes(writtenBytes)}{' '}
-                  {totalBytes > 0 ? `/ ${formatBytes(totalBytes)}` : ''}
-                </Text>
-              </View>
-
-              <Text style={[styles.progressNote, { color: textSecondary }]}>
-                Po dokončení stahování se automaticky otevře instalátor Androidu pro potvrzení.
+          {/* Verze badge */}
+          <View style={styles.versionBadgeRow}>
+            <View style={[styles.badge, { backgroundColor: isDark ? '#334155' : '#E2E8F0' }]}>
+              <Text style={[styles.badgeText, { color: textSecondary }]}>
+                Nyní: v{currentVersion}
               </Text>
             </View>
-          ) : downloadedUri ? (
-            <View style={styles.installedContainer}>
-              <View style={styles.installedIconBox}>
-                <PackageCheck size={36} color="#10B981" />
-              </View>
-              <Text style={[styles.installedTitle, { color: textPrimary }]}>
-                Soubor byl úspěšně stažen
-              </Text>
-              <Text style={[styles.installedDesc, { color: textSecondary }]}>
-                Pokud se instalátor neotevřel automaticky nebo jste jej omylem zavřeli, klikněte na
-                tlačítko níže.
+            <Text style={{ color: '#3B82F6', fontWeight: 'bold' }}>➔</Text>
+            <View style={[styles.badge, { backgroundColor: '#3B82F6' }]}>
+              <Text style={[styles.badgeText, { color: '#FFFFFF', fontWeight: 'bold' }]}>
+                Nová: v{release.version}
               </Text>
             </View>
-          ) : (
-            <ScrollView style={styles.notesScroll} showsVerticalScrollIndicator={true}>
-              <Text style={[styles.releaseName, { color: textPrimary }]}>{release.name}</Text>
-
-              {release.apkSize ? (
-                <Text style={[styles.apkSizeText, { color: textSecondary }]}>
-                  Velikost instalačního balíčku: ~{formatBytes(release.apkSize)}
-                </Text>
-              ) : null}
-
-              <Text style={[styles.notesHeading, { color: textSecondary }]}>Co je nového:</Text>
-              <View style={[styles.notesBox, { backgroundColor: codeBoxBg, borderColor }]}>
-                <Text style={[styles.notesText, { color: textPrimary }]}>
-                  {release.notes.trim() || 'Pravidelné vylepšení stability, rychlosti a nové funkce.'}
-                </Text>
-              </View>
-            </ScrollView>
-          )}
-
-          {/* Spodní akční tlačítka */}
-          <View style={styles.footer}>
-            {isDownloading ? (
-              <TouchableOpacity
-                style={[styles.cancelBtn, { borderColor }]}
-                onPress={handleCancel}
-                activeOpacity={0.7}
-              >
-                <Text style={[styles.cancelBtnText, { color: textSecondary }]}>
-                  Zrušit stahování
-                </Text>
-              </TouchableOpacity>
-            ) : downloadedUri ? (
-              <View style={styles.btnColumn}>
-                <TouchableOpacity
-                  style={styles.primaryBtn}
-                  onPress={handleReinstall}
-                  activeOpacity={0.8}
-                >
-                  <PackageCheck size={18} color="#FFFFFF" style={{ marginRight: 8 }} />
-                  <Text style={styles.primaryBtnText}>Spustit instalátor znovu</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={[styles.secondaryBtn, { borderColor }]}
-                  onPress={onClose}
-                  activeOpacity={0.7}
-                >
-                  <Text style={[styles.secondaryBtnText, { color: textSecondary }]}>Zavřít</Text>
-                </TouchableOpacity>
-              </View>
-            ) : (
-              <View style={styles.btnColumn}>
-                {release.apkDownloadUrl ? (
-                  <TouchableOpacity
-                    style={styles.primaryBtn}
-                    onPress={handleStartDownload}
-                    activeOpacity={0.8}
-                  >
-                    <Download size={18} color="#FFFFFF" style={{ marginRight: 8 }} />
-                    <Text style={styles.primaryBtnText}>Stáhnout a instalovat</Text>
-                  </TouchableOpacity>
-                ) : null}
-
-                <TouchableOpacity
-                  style={[
-                    styles.secondaryBtn,
-                    { borderColor },
-                    !release.apkDownloadUrl && styles.primaryBtnFallback,
-                  ]}
-                  onPress={handleOpenBrowser}
-                  activeOpacity={0.7}
-                >
-                  <ExternalLink
-                    size={16}
-                    color={!release.apkDownloadUrl ? '#FFFFFF' : textPrimary}
-                    style={{ marginRight: 8 }}
-                  />
-                  <Text
-                    style={[
-                      styles.secondaryBtnText,
-                      { color: !release.apkDownloadUrl ? '#FFFFFF' : textPrimary },
-                    ]}
-                  >
-                    Otevřít v prohlížeči (GitHub)
-                  </Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={styles.dismissBtn}
-                  onPress={onClose}
-                  activeOpacity={0.7}
-                >
-                  <Text style={[styles.dismissBtnText, { color: textSecondary }]}>Připomenout později</Text>
-                </TouchableOpacity>
-              </View>
-            )}
           </View>
         </View>
+
+        {/* Chybová hláška */}
+        {errorMessage && (
+          <View style={styles.errorBox}>
+            <AlertCircle size={18} color="#EF4444" style={{ marginRight: 8 }} />
+            <Text style={styles.errorText}>{errorMessage}</Text>
+          </View>
+        )}
+
+        {/* Obsah - buď průběh stahování, nebo informace o vydání */}
+        {isDownloading ? (
+          <View style={styles.progressContainer}>
+            <Text style={[styles.progressTitle, { color: textPrimary }]}>
+              Stahuji nový balíček aplikace...
+            </Text>
+
+            {/* Progress bar */}
+            <View style={[styles.progressBarBg, { backgroundColor: isDark ? '#334155' : '#E2E8F0' }]}>
+              <View
+                style={[
+                  styles.progressBarFill,
+                  { width: `${percentInt}%` },
+                ]}
+              />
+            </View>
+
+            {/* Procenta a MB */}
+            <View style={styles.progressStatsRow}>
+              <Text style={[styles.progressPercent, { color: '#3B82F6' }]}>
+                {percentInt} %
+              </Text>
+              <Text style={[styles.progressBytes, { color: textSecondary }]}>
+                {formatBytes(writtenBytes)}{' '}
+                {totalBytes > 0 ? `/ ${formatBytes(totalBytes)}` : ''}
+              </Text>
+            </View>
+
+            <Text style={[styles.progressNote, { color: textSecondary }]}>
+              Po dokončení stahování se automaticky otevře instalátor Androidu pro potvrzení.
+            </Text>
+          </View>
+        ) : downloadedUri ? (
+          <View style={styles.installedContainer}>
+            <View style={styles.installedIconBox}>
+              <PackageCheck size={36} color="#10B981" />
+            </View>
+            <Text style={[styles.installedTitle, { color: textPrimary }]}>
+              Soubor byl úspěšně stažen
+            </Text>
+            <Text style={[styles.installedDesc, { color: textSecondary }]}>
+              Pokud se instalátor neotevřel automaticky nebo jste jej omylem zavřeli, klikněte na
+              tlačítko níže.
+            </Text>
+          </View>
+        ) : (
+          <ScrollView style={styles.notesScroll} showsVerticalScrollIndicator={true}>
+            <Text style={[styles.releaseName, { color: textPrimary }]}>
+              {release.name || `Verze ${release.version}`}
+            </Text>
+
+            {release.apkSize ? (
+              <Text style={[styles.apkSizeText, { color: textSecondary }]}>
+                Velikost instalačního balíčku: ~{formatBytes(release.apkSize)}
+              </Text>
+            ) : null}
+
+            <Text style={[styles.notesHeading, { color: textSecondary }]}>Co je nového:</Text>
+            <View style={[styles.notesBox, { backgroundColor: codeBoxBg, borderColor }]}>
+              <Text style={[styles.notesText, { color: textPrimary }]}>
+                {(release.notes ? String(release.notes).trim() : '') ||
+                  'Pravidelné vylepšení stability, rychlosti a nové funkce.'}
+              </Text>
+            </View>
+          </ScrollView>
+        )}
+
+        {/* Spodní akční tlačítka */}
+        <View style={styles.footer}>
+          {isDownloading ? (
+            <TouchableOpacity
+              style={[styles.cancelBtn, { borderColor }]}
+              onPress={handleCancel}
+              activeOpacity={0.7}
+            >
+              <Text style={[styles.cancelBtnText, { color: textSecondary }]}>
+                Zrušit stahování
+              </Text>
+            </TouchableOpacity>
+          ) : downloadedUri ? (
+            <View style={styles.btnColumn}>
+              <TouchableOpacity
+                style={styles.primaryBtn}
+                onPress={handleReinstall}
+                activeOpacity={0.8}
+              >
+                <PackageCheck size={18} color="#FFFFFF" style={{ marginRight: 8 }} />
+                <Text style={styles.primaryBtnText}>Spustit instalátor znovu</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.secondaryBtn, { borderColor }]}
+                onPress={onClose}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.secondaryBtnText, { color: textSecondary }]}>Zavřít</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <View style={styles.btnColumn}>
+              {release.apkDownloadUrl ? (
+                <TouchableOpacity
+                  style={styles.primaryBtn}
+                  onPress={handleStartDownload}
+                  activeOpacity={0.8}
+                >
+                  <Download size={18} color="#FFFFFF" style={{ marginRight: 8 }} />
+                  <Text style={styles.primaryBtnText}>Stáhnout a instalovat</Text>
+                </TouchableOpacity>
+              ) : null}
+
+              <TouchableOpacity
+                style={[
+                  styles.secondaryBtn,
+                  { borderColor },
+                  !release.apkDownloadUrl && styles.primaryBtnFallback,
+                ]}
+                onPress={handleOpenBrowser}
+                activeOpacity={0.7}
+              >
+                <ExternalLink
+                  size={16}
+                  color={!release.apkDownloadUrl ? '#FFFFFF' : textPrimary}
+                  style={{ marginRight: 8 }}
+                />
+                <Text
+                  style={[
+                    styles.secondaryBtnText,
+                    { color: !release.apkDownloadUrl ? '#FFFFFF' : textPrimary },
+                  ]}
+                >
+                  Otevřít v prohlížeči (GitHub)
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.dismissBtn}
+                onPress={onClose}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.dismissBtnText, { color: textSecondary }]}>
+                  Připomenout později
+                </Text>
+              </TouchableOpacity>
+            </View>
+          )}
+        </View>
       </View>
-    </Modal>
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
-  overlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.65)',
+  overlayContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 999999,
+    elevation: 9999,
     justifyContent: 'center',
     alignItems: 'center',
     padding: 20,
+  },
+  backdrop: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.70)',
   },
   modalCard: {
     width: '100%',
@@ -352,10 +396,11 @@ const styles = StyleSheet.create({
     maxHeight: '85%',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.25,
+    shadowOpacity: 0.35,
     shadowRadius: 20,
-    elevation: 10,
+    elevation: 20,
     position: 'relative',
+    zIndex: 1000000,
   },
   closeBtn: {
     position: 'absolute',
