@@ -1,13 +1,14 @@
 import { Platform } from 'react-native';
 import Constants from 'expo-constants';
-import * as FileSystem from 'expo-file-system/legacy';
-import * as IntentLauncher from 'expo-intent-launcher';
 import * as Linking from 'expo-linking';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // GitHub konfigurace repozitáře
 export const GITHUB_OWNER = 'Patrik-Rybka';
 export const GITHUB_REPO = 'Shift-Calendar';
 export const GITHUB_RELEASES_API = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/releases/latest`;
+
+const DISMISSED_KEY = '@shift_calendar_update_dismissed_until';
 
 export interface ReleaseAsset {
   id: number;
@@ -37,10 +38,34 @@ export interface CheckUpdateResult {
 }
 
 /**
- * Zjistí aktuální verzi nainstalované aplikace (např. "1.0.0")
+ * Zjistí aktuální verzi nainstalované aplikace (např. "1.0.6")
  */
 export function getCurrentAppVersion(): string {
   return Constants.expoConfig?.version || '1.0.6';
+}
+
+/**
+ * Uloží odložení automatického vyskakování aktualizace na 24 hodin
+ */
+export async function dismissUpdateFor24Hours(): Promise<void> {
+  try {
+    const nextPromptTime = Date.now() + 24 * 60 * 60 * 1000;
+    await AsyncStorage.setItem(DISMISSED_KEY, String(nextPromptTime));
+  } catch {}
+}
+
+/**
+ * Zjistí, zda je automatické upozornění na aktualizaci ještě odloženo (méně než 24 h)
+ */
+export async function isUpdateDismissed(): Promise<boolean> {
+  try {
+    const item = await AsyncStorage.getItem(DISMISSED_KEY);
+    if (!item) return false;
+    const until = parseInt(item, 10);
+    return Date.now() < until;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -169,103 +194,16 @@ export async function checkForUpdate(manualVersion?: string): Promise<CheckUpdat
 }
 
 /**
- * Aktivní instance stahování umožňující sledování průběhu i zrušení
+ * Otevře přímý odkaz ke stažení APK souboru v prohlížeči (např. v Chromu),
+ * odkud si ho uživatel jedním klikem stáhne a nainstaluje.
  */
-let activeDownload: FileSystem.DownloadResumable | null = null;
-
-/**
- * Spustí stahování APK souboru s průběžným hlášením
- */
-export async function downloadApk(
-  downloadUrl: string,
-  onProgress: (percent: number, writtenBytes: number, totalBytes: number) => void
-): Promise<string> {
-  const fileUri = `${FileSystem.cacheDirectory}shift_calendar_update.apk`;
-
-  // Pokud již existuje starý stažený APK soubor, smažeme ho
-  try {
-    const existing = await FileSystem.getInfoAsync(fileUri);
-    if (existing.exists) {
-      await FileSystem.deleteAsync(fileUri, { idempotent: true });
-    }
-  } catch {
-    // Ignorujeme případnou chybu při mazání
-  }
-
-  activeDownload = FileSystem.createDownloadResumable(
-    downloadUrl,
-    fileUri,
-    {},
-    (downloadProgress) => {
-      const written = downloadProgress.totalBytesWritten;
-      const expected = downloadProgress.totalBytesExpectedToWrite;
-      const percent = expected > 0 ? Math.min(1, Math.max(0, written / expected)) : 0;
-      onProgress(percent, written, expected);
-    }
-  );
-
-  const result = await activeDownload.downloadAsync();
-  activeDownload = null;
-
-  if (!result || !result.uri) {
-    throw new Error('Stahování souboru se nezdařilo nebo bylo přerušeno.');
-  }
-
-  return result.uri;
-}
-
-/**
- * Zruší právě probíhající stahování
- */
-export async function cancelApkDownload(): Promise<void> {
-  if (activeDownload) {
+export async function openUpdateDownload(downloadUrl: string | null, fallbackHtmlUrl: string): Promise<void> {
+  const targetUrl = downloadUrl || fallbackHtmlUrl;
+  if (targetUrl) {
     try {
-      await activeDownload.cancelAsync();
-    } catch {
-      // Ignorovat
-    } finally {
-      activeDownload = null;
-    }
-  }
-}
-
-/**
- * Spustí systémový instalátor balíčků v Androidu pro stažený APK soubor
- */
-export async function triggerApkInstall(localFileUri: string, fallbackUrl?: string | null): Promise<void> {
-  if (Platform.OS === 'android') {
-    try {
-      // Převedeme file:// URI na content:// URI s využitím FileProvideru Expo
-      const contentUri = await FileSystem.getContentUriAsync(localFileUri);
-
-      // FLAG_GRANT_READ_URI_PERMISSION = 1 (0x1)
-      // FLAG_ACTIVITY_NEW_TASK = 268435456 (0x10000000)
-      const installFlags = 1 | 268435456;
-
-      // Spustíme standardní Android VIEW Intent pro instalaci APK
-      await IntentLauncher.startActivityAsync('android.intent.action.VIEW', {
-        data: contentUri,
-        flags: installFlags,
-        type: 'application/vnd.android.package-archive',
-      });
-      return;
-    } catch (error: any) {
-      console.warn('Nepodařilo se spustit přímý instalátor balíčků:', error);
-      // Pokud přímé spuštění selže (např. chybějící oprávnění nebo systémové omezení),
-      // nabídneme otevření v prohlížeči
-      if (fallbackUrl) {
-        try {
-          await Linking.openURL(fallbackUrl);
-        } catch {}
-        return;
-      }
-    }
-  } else {
-    // Pro web / iOS / jiné platformy otevřeme odkaz
-    if (fallbackUrl) {
-      try {
-        await Linking.openURL(fallbackUrl);
-      } catch {}
+      await Linking.openURL(targetUrl);
+    } catch (err) {
+      console.warn('Nepodařilo se otevřít odkaz ke stažení:', err);
     }
   }
 }

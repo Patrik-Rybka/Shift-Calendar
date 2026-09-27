@@ -4,18 +4,27 @@ import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { UpdateModal } from '@/components/common/UpdateModal';
-import { checkForUpdate, getCurrentAppVersion, ReleaseInfo } from '@/services/updateService';
+import {
+  checkForUpdate,
+  getCurrentAppVersion,
+  isUpdateDismissed,
+  ReleaseInfo,
+} from '@/services/updateService';
 
 export default function RootLayout() {
   const isDark = useColorScheme() === 'dark';
   const [updateModalVisible, setUpdateModalVisible] = useState(false);
   const [availableRelease, setAvailableRelease] = useState<ReleaseInfo | null>(null);
 
-  // Globální kontrola aktualizací při startu aplikace s prodlevou pro dokončení prvotního vykreslení
+  // Globální kontrola aktualizací při startu aplikace
   useEffect(() => {
     let isMounted = true;
     const checkSilentUpdate = async () => {
       try {
+        // Pokud uživatel kliknul "Připomenout zítra", nezobrazujeme popup po dobu 24 hodin
+        const dismissed = await isUpdateDismissed();
+        if (dismissed) return;
+
         const result = await checkForUpdate();
         if (isMounted && result?.hasUpdate && result?.release) {
           setAvailableRelease(result.release);
@@ -33,19 +42,22 @@ export default function RootLayout() {
     };
   }, []);
 
-  // Kontrola i při návratu do aplikace z pozadí
+  // Kontrola i při návratu do aplikace z pozadí (pokud není odloženo na zítřek)
   useEffect(() => {
     let isMounted = true;
     const subscription = AppState.addEventListener('change', (nextState) => {
       if (nextState === 'active') {
-        checkForUpdate()
-          .then((result) => {
-            if (isMounted && result?.hasUpdate && result?.release) {
-              setAvailableRelease(result.release);
-              setUpdateModalVisible(true);
-            }
-          })
-          .catch(() => {});
+        isUpdateDismissed().then((dismissed) => {
+          if (dismissed) return;
+          checkForUpdate()
+            .then((result) => {
+              if (isMounted && result?.hasUpdate && result?.release) {
+                setAvailableRelease(result.release);
+                setUpdateModalVisible(true);
+              }
+            })
+            .catch(() => {});
+        });
       }
     });
 
