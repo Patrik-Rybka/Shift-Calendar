@@ -65,6 +65,7 @@ import {
   getCurrentAppVersion,
   ReleaseInfo,
 } from '@/services/updateService';
+import { shareGroupInvite } from '@/utils/shareUtils';
 
 import { useAuthStore } from '@/store/useAuthStore';
 import { useShiftStore } from '@/store/useShiftStore';
@@ -107,42 +108,42 @@ const PERMISSION_ROWS: {
   icon: React.ReactNode;
   color: string;
 }[] = [
-  {
-    key: 'canViewCalendar',
-    label: 'Zobrazit kalendář',
-    sublabel: 'Může otevřít a prohlížet rodinný kalendář',
-    icon: null,
-    color: '#3B82F6',
-  },
-  {
-    key: 'canEditOwnShifts',
-    label: 'Zapisovat vlastní směny',
-    sublabel: 'Může přidávat a mazat pouze své vlastní směny',
-    icon: null,
-    color: '#0D9488',
-  },
-  {
-    key: 'canEditAllShifts',
-    label: 'Zapisovat všem',
-    sublabel: 'Může přidávat a mazat směny komukoliv v rodině',
-    icon: null,
-    color: '#8B5CF6',
-  },
-  {
-    key: 'canAddNotes',
-    label: 'Přidávat poznámky',
-    sublabel: 'Může přidávat a mazat poznámky ke dnům',
-    icon: null,
-    color: '#F59E0B',
-  },
-  {
-    key: 'canManagePresets',
-    label: 'Spravovat předvolby směn',
-    sublabel: 'Může vytvářet, upravovat a mazat typy směn',
-    icon: null,
-    color: '#EC4899',
-  },
-];
+    {
+      key: 'canViewCalendar',
+      label: 'Zobrazit kalendář',
+      sublabel: 'Může otevřít a prohlížet rodinný kalendář',
+      icon: null,
+      color: '#3B82F6',
+    },
+    {
+      key: 'canEditOwnShifts',
+      label: 'Zapisovat vlastní směny',
+      sublabel: 'Může přidávat a mazat pouze své vlastní směny',
+      icon: null,
+      color: '#0D9488',
+    },
+    {
+      key: 'canEditAllShifts',
+      label: 'Zapisovat všem',
+      sublabel: 'Může přidávat a mazat směny komukoliv v rodině',
+      icon: null,
+      color: '#8B5CF6',
+    },
+    {
+      key: 'canAddNotes',
+      label: 'Přidávat poznámky',
+      sublabel: 'Může přidávat a mazat poznámky ke dnům',
+      icon: null,
+      color: '#F59E0B',
+    },
+    {
+      key: 'canManagePresets',
+      label: 'Spravovat předvolby směn',
+      sublabel: 'Může vytvářet, upravovat a mazat typy směn',
+      icon: null,
+      color: '#EC4899',
+    },
+  ];
 
 export default function SettingsScreen() {
   const router = useRouter();
@@ -377,6 +378,15 @@ export default function SettingsScreen() {
       setCopiedCode(true);
       setTimeout(() => setCopiedCode(false), 2500);
     } catch (e) { console.error(e); }
+  };
+
+  const handleShareInvite = async () => {
+    if (!currentGroup?.join_code) return;
+    await shareGroupInvite({
+      groupName: currentGroup.name || 'Rodinný kalendář',
+      joinCode: currentGroup.join_code,
+      requireApproval: currentGroup.require_approval,
+    });
   };
 
   const handleAddMember = async () => {
@@ -740,10 +750,20 @@ export default function SettingsScreen() {
                 )}
               </TouchableOpacity>
             </View>
+
+            {/* Tlačítko pro sdílení pozvánky pod kódem */}
+            <TouchableOpacity
+              style={styles.shareInviteBtn}
+              onPress={handleShareInvite}
+              activeOpacity={0.8}
+            >
+              <Share2 size={16} color="#FFFFFF" style={{ marginRight: 8 }} />
+              <Text style={styles.shareInviteBtnText}>Sdílet pozvánku pro rodinu</Text>
+            </TouchableOpacity>
+
             <View style={[styles.joinCodeHintRow, { borderTopColor: ui.border }]}>
-              <Share2 size={12} color={ui.textMuted} />
               <Text style={[styles.joinCodeHint, { color: ui.textMuted }]}>
-                Pošlete tento kód ostatním — zadají jej při přihlášení a zobrazí se jim tento rodinný kalendář.
+                Odešle zprávu s kódem rodiny i odkazem ke stažení aplikace přes WhatsApp, SMS atd.
               </Text>
             </View>
           </View>
@@ -2249,8 +2269,29 @@ export default function SettingsScreen() {
             </View>
 
             <Text style={[styles.addMemberDesc, { color: ui.textMuted }]}>
-              Vytvořte profil pro dítě nebo příbuzného bez smartphonu. Pak mu v kalendáři budete moci zapisovat směny a události.
+              Vytvořte profil pro člena bez telefonu. Pak mu v kalendáři budete moci zapisovat směny a události.
             </Text>
+
+            {/* Rychlá možnost pozvat člena s telefonem */}
+            <View style={[styles.inviteNoticeBanner, { backgroundColor: isDark ? 'rgba(59, 130, 246, 0.12)' : '#EFF6FF', borderColor: isDark ? 'rgba(59, 130, 246, 0.3)' : '#BFDBFE' }]}>
+              <Share2 size={16} color="#3B82F6" style={{ marginTop: 2 }} />
+              <View style={{ flex: 1, gap: 2 }}>
+                <Text style={[styles.inviteNoticeTitle, { color: ui.text }]}>Chcete pozvat člena s telefonem?</Text>
+                <Text style={[styles.inviteNoticeDesc, { color: ui.textMuted }]}>
+                  Pošlete mu odkaz ke sdílení kalendáře.
+                </Text>
+              </View>
+              <TouchableOpacity
+                style={styles.inviteNoticeBtn}
+                onPress={() => {
+                  setAddMemberVisible(false);
+                  handleShareInvite();
+                }}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.inviteNoticeBtnText}>Sdílet</Text>
+              </TouchableOpacity>
+            </View>
 
             <View style={styles.fieldGroup}>
               <Text style={[styles.fieldLabel, { color: ui.textMuted }]}>Jméno člena</Text>
@@ -2421,6 +2462,26 @@ const styles = StyleSheet.create({
   joinCodeValue: { fontSize: 27, fontWeight: '900', letterSpacing: 5, fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace', marginTop: 2 },
   copyBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10, borderWidth: 1.5 },
   copyBtnText: { fontSize: 12, fontWeight: '700' },
+  shareInviteBtn: {
+    backgroundColor: '#3B82F6',
+    borderRadius: 12,
+    paddingVertical: 11,
+    paddingHorizontal: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 4,
+    shadowColor: '#3B82F6',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.25,
+    shadowRadius: 6,
+    elevation: 3,
+  },
+  shareInviteBtnText: {
+    color: '#FFFFFF',
+    fontSize: 13.5,
+    fontWeight: '700',
+  },
   joinCodeHintRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 6, paddingTop: 8, borderTopWidth: 1 },
   joinCodeHint: { flex: 1, fontSize: 11.5, lineHeight: 16, fontWeight: '500' },
 
@@ -2481,6 +2542,11 @@ const styles = StyleSheet.create({
   modalTitle: { fontSize: 17, fontWeight: '800' },
   closeBtn: { width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
   addMemberDesc: { fontSize: 12, lineHeight: 17, fontWeight: '500' },
+  inviteNoticeBanner: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 11, borderRadius: 12, borderWidth: 1 },
+  inviteNoticeTitle: { fontSize: 12.5, fontWeight: '700' },
+  inviteNoticeDesc: { fontSize: 11, fontWeight: '500', lineHeight: 15 },
+  inviteNoticeBtn: { backgroundColor: '#3B82F6', paddingHorizontal: 12, paddingVertical: 7, borderRadius: 8 },
+  inviteNoticeBtnText: { color: '#FFFFFF', fontSize: 12, fontWeight: '700' },
 
   // Form
   fieldGroup: { gap: 5 },

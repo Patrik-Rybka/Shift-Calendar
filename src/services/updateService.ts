@@ -146,9 +146,10 @@ export async function checkForUpdate(manualVersion?: string): Promise<CheckUpdat
 
     const isNewer = isNewerVersion(currentVersion, remoteVersion);
 
-    // Hledáme .apk soubor v přílohách vydání
+    // Hledáme .apk soubor v přílohách vydání (upřednostníme ten s verzí v názvu, např. kalendar-smen-v1.0.6.apk)
     const apkAsset = Array.isArray(data.assets)
-      ? data.assets.find((a: ReleaseAsset) => a.name.toLowerCase().endsWith('.apk'))
+      ? data.assets.find((a: ReleaseAsset) => a.name.toLowerCase().includes(`v${remoteVersion}`) && a.name.toLowerCase().endsWith('.apk'))
+        || data.assets.find((a: ReleaseAsset) => a.name.toLowerCase().endsWith('.apk'))
       : null;
 
     const releaseInfo: ReleaseInfo = {

@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -18,7 +18,8 @@ import {
   Switch,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
+import { shareGroupInvite } from '@/utils/shareUtils';
 import {
   Users,
   KeyRound,
@@ -51,6 +52,7 @@ import type { DbGroup } from '@/services/db/neonClient';
 
 export default function GroupChoiceScreen() {
   const router = useRouter();
+  const params = useLocalSearchParams<{ code?: string }>();
   const isDark = useColorScheme() === 'dark';
 
   const { currentUser, currentGroup, setCurrentUser, setCurrentGroup, setGroupMembers, logout } =
@@ -59,6 +61,14 @@ export default function GroupChoiceScreen() {
   const [tab, setTab] = useState<'create' | 'join'>('create');
   const [groupName, setGroupName] = useState('Naše rodina');
   const [joinCode, setJoinCode] = useState('');
+
+  // Automatické předvyplnění kódu skupiny při otevření z odkazu (?code=XYZ)
+  useEffect(() => {
+    if (params?.code) {
+      setTab('join');
+      setJoinCode(String(params.code).trim().toUpperCase());
+    }
+  }, [params?.code]);
   const [loading, setLoading] = useState(false);
   const [createdGroup, setCreatedGroup] = useState<DbGroup | null>(null);
 
@@ -152,22 +162,12 @@ export default function GroupChoiceScreen() {
 
   const handleShareCode = async () => {
     if (!createdGroup) return;
-    try {
-      let msg = `Ahoj! Založil(a) jsem náš rodinný kalendář směn „${createdGroup.name}“.\n\nStáhni si aplikaci a zadej kód rodiny: ${createdGroup.join_code}`;
-      if (enablePassword && groupPassword.trim()) {
-        msg += `\nHeslo / PIN skupiny: ${groupPassword.trim()}`;
-      }
-      if (requireApproval) {
-        msg += `\n(Po zadání kódu potvrdím vaše schválení v aplikaci)`;
-      }
-
-      await Share.share({
-        title: 'Pozvánka do rodinného kalendáře směn',
-        message: msg,
-      });
-    } catch (error) {
-      console.error('Error sharing code:', error);
-    }
+    await shareGroupInvite({
+      groupName: createdGroup.name,
+      joinCode: createdGroup.join_code,
+      password: enablePassword && groupPassword.trim() ? groupPassword.trim() : null,
+      requireApproval: requireApproval,
+    });
   };
 
   const handleJoin = async () => {

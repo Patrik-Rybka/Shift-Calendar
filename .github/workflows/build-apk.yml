@@ -52,18 +52,24 @@ jobs:
       - name: 🔍 Příprava hotového APK souboru
         run: |
           mkdir -p build-output
-          find android/app/build/outputs/apk/ -name "*.apk" -exec cp {} build-output/kalendar-smen.apk \;
+          VERSION=$(node -p "require('./app.json').expo.version")
+          APK_VERSIONED="kalendar-smen-v${VERSION}.apk"
+          echo "Vytvářím pojmenovaný balíček: $APK_VERSIONED"
+          find android/app/build/outputs/apk/ -name "*.apk" -exec cp {} "build-output/${APK_VERSIONED}" \;
+          cp "build-output/${APK_VERSIONED}" build-output/kalendar-smen.apk
 
       - name: 📤 Uložení APK jako artefaktu v GitHub Actions
         uses: actions/upload-artifact@v4
         with:
           name: kalendar-smen-apk
-          path: build-output/kalendar-smen.apk
+          path: build-output/
 
       - name: 🚀 Automatické připojení k GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: build-output/kalendar-smen.apk
+          files: |
+            build-output/kalendar-smen-v*.apk
+            build-output/kalendar-smen.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
