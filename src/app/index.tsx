@@ -147,7 +147,7 @@ export default function CalendarScreen() {
     initData();
   }, [currentGroup?.id, currentMonth]);
 
-  // Auto-sync whenever user returns to the app from background
+  // Auto-sync whenever user returns to the app from background or minimizes app
   useEffect(() => {
     if (!currentGroup?.id) return;
 
@@ -156,6 +156,13 @@ export default function CalendarScreen() {
         syncWithNeon(currentGroup.id).catch((e) => {
           console.warn('Background foreground sync notice:', e);
         });
+      } else if (nextState === 'background' || nextState === 'inactive') {
+        const hasPending = Object.keys(useShiftStore.getState().pendingChanges).length > 0;
+        if (hasPending) {
+          syncWithNeon(currentGroup.id).catch((e) => {
+            console.warn('Background auto-save notice:', e);
+          });
+        }
       }
     });
 
@@ -200,10 +207,14 @@ export default function CalendarScreen() {
     });
   }, [groupMembers, memberOrderIds]);
 
-  // Helper to extract shifts for a given calendar day (Step 7.4C respects ordering and hidden filter)
+  // Helper to extract shifts for a given calendar day (Step 7.4C respects ordering and hidden filter, groups shared events)
   const getDayShifts = (day: CalendarDay) => {
     const list: Array<{
       member: typeof groupMembers[0];
+      members?: Array<typeof groupMembers[0]>;
+      isAllMembers?: boolean;
+      isShared?: boolean;
+      memberNames?: string;
       preset?: typeof presets[0];
       customHours?: number | null;
       note?: string | null;
@@ -214,31 +225,143 @@ export default function CalendarScreen() {
     const safeHidden = Array.isArray(hiddenMemberIds) ? hiddenMemberIds : [];
     const safeShifts = shifts || {};
     const safePresets = Array.isArray(presets) ? presets : [];
+    const visibleMembers = orderedMembers.filter((m) => m && m.id && !safeHidden.includes(m.id));
 
-    for (const member of orderedMembers) {
-      if (!member || !member.id) continue;
-      // Step 7.4C: Skip if member is hidden from calendar view
-      if (safeHidden.includes(member.id)) {
-        continue;
-      }
+    // Group shifts by preset ID to detect shared family events
+    const presetGroups: Record<
+      string,
+      Array<{
+        member: typeof groupMembers[0];
+        customHours?: number | null;
+        note?: string | null;
+        preset?: typeof presets[0];
+        color: string;
+        title: string;
+      }>
+    > = {};
 
+    for (const member of visibleMembers) {
       const key = getShiftMapKey(member.id, day.dateStr);
       const shift = safeShifts[key];
-      if (shift && (shift.shift_preset_id || (typeof shift.note === 'string' && shift.note.trim().length > 0))) {
-        const preset = shift.shift_preset_id ? safePresets.find((p) => p && p.id === shift.shift_preset_id) : undefined;
+      if (shift && shift.shift_preset_id) {
+        const preset = safePresets.find((p) => p && p.id === shift.shift_preset_id);
         const color = preset?.color || member.color || '#2563EB';
-        const title = preset?.title || preset?.short_code || shift.note || 'Poznámka';
-        list.push({
+        const title = preset?.title || preset?.short_code || 'Směna';
+        if (!presetGroups[shift.shift_preset_id]) {
+          presetGroups[shift.shift_preset_id] = [];
+        }
+        presetGroups[shift.shift_preset_id].push({
           member,
-          preset,
           customHours: shift.custom_hours,
           note: shift.note,
+          preset,
           color,
           title,
         });
       }
     }
+
+    for (const [presetId, entries] of Object.entries(presetGroups)) {
+      if (entries.length > 1) {
+        // Shared by 2 or more family members!
+        const isAll = entries.length === visibleMembers.length && visibleMembers.length > 1;
+        const first = entries[0];
+        const sharedNote = entries.find((e) => e.note && e.note.trim().length > 0)?.note || null;
+        list.push({
+          member: first.member,
+          members: entries.map((e) => e.member),
+          isAllMembers: isAll,
+          isShared: true,
+          memberNames: isAll ? 'Celá rodina' : entries.map((e) => e.member.display_name).join(', '),
+          preset: first.preset,
+          customHours: first.customHours,
+          note: sharedNote,
+          color: first.color,
+          title: first.title,
+        });
+      } else {
+        // Individual member shift
+        const e = entries[0];
+        list.push({
+          member: e.member,
+          members: [e.member],
+          isAllMembers: false,
+          isShared: false,
+          memberNames: e.member.display_name,
+          preset: e.preset,
+          customHours: e.customHours,
+          note: e.note,
+          color: e.color,
+          title: e.title,
+        });
+      }
+    }
+
     return list;
+  };
+
+  // Helper to extract note-only entries for a day (member has a note, but NO shift preset)
+  const getDayNoteOnlyEntries = (day: CalendarDay) => {
+    const list: Array<{
+      member: typeof groupMembers[0];
+      members?: Array<typeof groupMembers[0]>;
+      isAllMembers?: boolean;
+      note: string;
+      color: string;
+    }> = [];
+
+    const safeHidden = Array.isArray(hiddenMemberIds) ? hiddenMemberIds : [];
+    const safeShifts = shifts || {};
+    const visibleMembers = orderedMembers.filter((m) => m && m.id && !safeHidden.includes(m.id));
+
+    // Deduplicate notes that are identical across members
+    const noteMap: Record<string, Array<typeof groupMembers[0]>> = {};
+
+    for (const member of visibleMembers) {
+      const key = getShiftMapKey(member.id, day.dateStr);
+      const shift = safeShifts[key];
+      if (shift && !shift.shift_preset_id && typeof shift.note === 'string' && shift.note.trim().length > 0) {
+        const text = shift.note.trim();
+        if (!noteMap[text]) noteMap[text] = [];
+        noteMap[text].push(member);
+      }
+    }
+
+    for (const [text, membersWithNote] of Object.entries(noteMap)) {
+      const isAll = membersWithNote.length === visibleMembers.length && visibleMembers.length > 1;
+      list.push({
+        member: membersWithNote[0],
+        members: membersWithNote,
+        isAllMembers: isAll,
+        note: text,
+        color: isAll ? '#8B5CF6' : (membersWithNote[0].color || '#F59E0B'),
+      });
+    }
+
+    return list;
+  };
+
+  // Prominent corner indicator for days with a note but without any shift preset
+  const renderCellCorner = (day: CalendarDay) => {
+    const noteOnly = getDayNoteOnlyEntries(day);
+    if (noteOnly.length === 0) return null;
+
+    return (
+      <View style={styles.cornerNoteContainer}>
+        {noteOnly.slice(0, 2).map((item, idx) => (
+          <View
+            key={`corner_note_${item.member.id}_${idx}`}
+            style={[
+              styles.cornerNoteBadge,
+              { backgroundColor: item.color || '#F59E0B' },
+            ]}
+          />
+        ))}
+        {noteOnly.length > 2 && (
+          <View style={[styles.cornerNoteBadge, { backgroundColor: '#64748B' }]} />
+        )}
+      </View>
+    );
   };
 
   // Render background for day cell (Step 7.4A - full_fill / 50-50 split)
@@ -326,9 +449,46 @@ export default function CalendarScreen() {
             const blockBg = isDark ? `${item.color}35` : `${item.color}22`;
             const textColor = isDark ? '#FFFFFF' : '#0F172A';
 
+            // Shared whole-family action -> single clean line with Users icon and Title, no redundant/truncated "Celá rodina" subtitle!
+            if (item.isAllMembers) {
+              return (
+                <View
+                  key={`${item.preset?.id || item.member?.id}_${idx}`}
+                  style={[
+                    styles.blockRow,
+                    {
+                      backgroundColor: blockBg,
+                      borderLeftColor: item.color,
+                      paddingVertical: calendarDensity === 'compact' ? 1.5 : 3.5,
+                      paddingHorizontal: 2.5,
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                    },
+                  ]}
+                >
+                  <Users size={8.5} color={item.color} style={{ marginRight: 2.5, flexShrink: 0 }} />
+                  <Text
+                    style={[
+                      styles.blockTitleText,
+                      {
+                        color: textColor,
+                        fontSize: Math.round(8.5 * fontMultiplier),
+                        lineHeight: Math.round(11 * fontMultiplier),
+                        fontWeight: '800',
+                      },
+                    ]}
+                    numberOfLines={1}
+                  >
+                    {item.title}
+                  </Text>
+                </View>
+              );
+            }
+
             return (
               <View
-                key={`${item.member.id}_${idx}`}
+                key={`${item.preset?.id || item.member?.id}_${idx}`}
                 style={[
                   styles.blockRow,
                   {
@@ -354,11 +514,13 @@ export default function CalendarScreen() {
                   {item.title}
                 </Text>
 
-                {/* Line 2: Member Name / Note */}
+                {/* Line 2: Member Name / Shared Names / Note */}
                 <View style={styles.blockSubRow}>
-                  {item.note && (
+                  {item.isShared ? (
+                    <Users size={7.5} color={item.color} style={{ marginRight: 2 }} />
+                  ) : item.note ? (
                     <FileText size={7} color={item.color} style={{ marginRight: 2 }} />
-                  )}
+                  ) : null}
                   <Text
                     style={[
                       styles.blockMemberText,
@@ -366,11 +528,12 @@ export default function CalendarScreen() {
                         color: isDark ? '#E2E8F0' : '#475569',
                         fontSize: Math.round(7.5 * fontMultiplier),
                         lineHeight: Math.round(9 * fontMultiplier),
+                        fontWeight: item.isShared ? '800' : '600',
                       },
                     ]}
                     numberOfLines={1}
                   >
-                    {item.member.display_name}
+                    {item.isShared ? item.memberNames : item.member?.display_name}
                   </Text>
                 </View>
               </View>
@@ -393,12 +556,13 @@ export default function CalendarScreen() {
           <View style={styles.dotsRow}>
             {dayShifts.slice(0, 4).map((item, idx) => (
               <View
-                key={`${item.member.id}_${idx}`}
+                key={`${item.preset?.id || item.member?.id}_${idx}`}
                 style={[
                   styles.shiftDot,
                   {
                     backgroundColor: item.color,
                     borderColor: isDark ? 'rgba(255,255,255,0.35)' : 'rgba(0,0,0,0.15)',
+                    ...(item.isAllMembers ? { width: 10, height: 6, borderRadius: 3 } : {}),
                   },
                 ]}
               />
@@ -425,7 +589,7 @@ export default function CalendarScreen() {
           <View style={styles.stripItemsList}>
             {dayShifts.slice(0, 2).map((item, idx) => (
               <View
-                key={`${item.member.id}_${idx}`}
+                key={`${item.preset?.id || item.member?.id}_${idx}`}
                 style={[
                   styles.stripChip,
                   {
@@ -435,12 +599,16 @@ export default function CalendarScreen() {
                   },
                 ]}
               >
-                <View
-                  style={[
-                    styles.memberDot,
-                    { backgroundColor: item.member.color || item.color },
-                  ]}
-                />
+                {item.isAllMembers || item.isShared ? (
+                  <Users size={7.5} color={item.color} style={{ marginRight: 2 }} />
+                ) : (
+                  <View
+                    style={[
+                      styles.memberDot,
+                      { backgroundColor: item.member?.color || item.color },
+                    ]}
+                  />
+                )}
                 <Text
                   style={[
                     styles.stripChipText,
@@ -479,7 +647,7 @@ export default function CalendarScreen() {
         <View style={styles.fullFillContainer}>
           {dayShifts.slice(0, 2).map((item, idx) => (
             <View
-              key={`${item.member.id}_${idx}`}
+              key={`${item.preset?.id || item.member?.id}_${idx}`}
               style={[
                 styles.fullFillChip,
                 {
@@ -489,12 +657,16 @@ export default function CalendarScreen() {
                 },
               ]}
             >
-              <View
-                style={[
-                  styles.memberDot,
-                  { backgroundColor: item.member.color || item.color },
-                ]}
-              />
+              {item.isAllMembers || item.isShared ? (
+                <Users size={8} color={item.color} style={{ marginRight: 2 }} />
+              ) : (
+                <View
+                  style={[
+                    styles.memberDot,
+                    { backgroundColor: item.member?.color || item.color },
+                  ]}
+                />
+              )}
               <Text
                 style={[
                   styles.fullFillChipText,
@@ -530,7 +702,7 @@ export default function CalendarScreen() {
 
           return (
             <View
-              key={`${item.member.id}_${idx}`}
+              key={`${item.preset?.id || item.member?.id}_${idx}`}
               style={[
                 styles.shiftPill,
                 {
@@ -540,12 +712,16 @@ export default function CalendarScreen() {
                 },
               ]}
             >
-              <View
-                style={[
-                  styles.memberDot,
-                  { backgroundColor: item.member.color || '#0EA5E9' },
-                ]}
-              />
+              {item.isAllMembers || item.isShared ? (
+                <Users size={8} color={pillColor} style={{ marginRight: 2 }} />
+              ) : (
+                <View
+                  style={[
+                    styles.memberDot,
+                    { backgroundColor: item.member?.color || '#0EA5E9' },
+                  ]}
+                />
+              )}
               {item.note && (
                 <FileText
                   size={8.5}
@@ -559,6 +735,7 @@ export default function CalendarScreen() {
                   {
                     color: isDark ? '#F9FAFB' : '#0F172A',
                     fontSize: Math.round(8.5 * fontMultiplier),
+                    fontWeight: item.isAllMembers ? '800' : '600',
                   },
                 ]}
                 numberOfLines={1}
@@ -606,7 +783,10 @@ export default function CalendarScreen() {
     (startDateStr: string, endDateStr: string) => {
       const minDate = startDateStr < endDateStr ? startDateStr : endDateStr;
       const maxDate = startDateStr < endDateStr ? endDateStr : startDateStr;
-      const targetUserId = editingUserId || currentUser?.id;
+      const targetUserId =
+        editingUserId === '__ALL__'
+          ? (currentUser?.id || groupMembers[0]?.id)
+          : (editingUserId || currentUser?.id);
       const key = targetUserId ? getShiftMapKey(targetUserId, minDate) : '';
       const existingShift = key ? shifts[key] : null;
 
@@ -616,14 +796,17 @@ export default function CalendarScreen() {
       setSelectedRange({ start: minDate, end: maxDate });
       setPickerVisible(true);
     },
-    [setRangeStart, setRangeEnd, editingUserId, currentUser?.id, shifts]
+    [setRangeStart, setRangeEnd, editingUserId, currentUser?.id, groupMembers, shifts]
   );
 
   const handleDayTapInEditMode = useCallback(
     (day: CalendarDay) => {
       if (!day.isCurrentMonth) return;
 
-      const targetUserId = editingUserId || currentUser?.id;
+      const targetUserId =
+        editingUserId === '__ALL__'
+          ? (currentUser?.id || groupMembers[0]?.id)
+          : (editingUserId || currentUser?.id);
       const key = targetUserId ? getShiftMapKey(targetUserId, day.dateStr) : '';
       const existingShift = key ? shifts[key] : null;
 
@@ -633,7 +816,7 @@ export default function CalendarScreen() {
       setSelectedRange({ start: day.dateStr, end: day.dateStr });
       setPickerVisible(true);
     },
-    [setRangeStart, setRangeEnd, editingUserId, currentUser?.id, shifts]
+    [setRangeStart, setRangeEnd, editingUserId, currentUser?.id, groupMembers, shifts]
   );
 
   const showToast = useCallback((msg: string) => {
@@ -645,33 +828,41 @@ export default function CalendarScreen() {
 
   const handleApplyPresetFromModal = useCallback(
     (presetId: string | null, note?: string | null) => {
-      const targetUserId = editingUserId || currentUser?.id;
-      if (!currentGroup?.id || !targetUserId || !selectedRange) return;
+      if (!currentGroup?.id || !selectedRange) return;
+
+      const isAllFamily = editingUserId === '__ALL__';
+      const targetUserIds: string[] = isAllFamily
+        ? (Array.isArray(groupMembers) ? groupMembers.map((m) => m.id) : [])
+        : [editingUserId || currentUser?.id].filter(Boolean) as string[];
+
+      if (targetUserIds.length === 0) return;
 
       // Safely generate exact date strings without any UTC/timezone skew
       const dates = getDatesBetween(selectedRange.start, selectedRange.end);
 
       for (const dStr of dates) {
-        if (presetId === '__DELETE__' || presetId === null) {
-          removeShift(currentGroup.id, targetUserId, dStr);
-        } else if (presetId === '__NOTE_ONLY__') {
-          const existingKey = getShiftMapKey(targetUserId, dStr);
-          const existingShift = shifts[existingKey];
-          applyShift({
-            groupId: currentGroup.id,
-            userId: targetUserId,
-            date: dStr,
-            presetId: existingShift?.shift_preset_id || null,
-            note: note !== undefined ? note : null,
-          });
-        } else {
-          applyShift({
-            groupId: currentGroup.id,
-            userId: targetUserId,
-            date: dStr,
-            presetId,
-            note: note !== undefined ? note : null,
-          });
+        for (const targetUserId of targetUserIds) {
+          if (presetId === '__DELETE__' || presetId === null) {
+            removeShift(currentGroup.id, targetUserId, dStr);
+          } else if (presetId === '__NOTE_ONLY__') {
+            const existingKey = getShiftMapKey(targetUserId, dStr);
+            const existingShift = shifts[existingKey];
+            applyShift({
+              groupId: currentGroup.id,
+              userId: targetUserId,
+              date: dStr,
+              presetId: existingShift?.shift_preset_id || null,
+              note: note !== undefined ? note : null,
+            });
+          } else {
+            applyShift({
+              groupId: currentGroup.id,
+              userId: targetUserId,
+              date: dStr,
+              presetId,
+              note: note !== undefined ? note : null,
+            });
+          }
         }
       }
 
@@ -687,11 +878,13 @@ export default function CalendarScreen() {
           : presetId === '__NOTE_ONLY__'
           ? 'Poznámka'
           : presetObj?.title || 'Směna';
-      showToast(`✓ ${title} uložena`);
+      const targetDesc = isAllFamily ? ' pro celou rodinu' : '';
+      showToast(`✓ ${title} uložena${targetDesc}`);
     },
     [
       editingUserId,
       currentUser?.id,
+      groupMembers,
       currentGroup?.id,
       selectedRange,
       shifts,
@@ -701,6 +894,27 @@ export default function CalendarScreen() {
       presets,
       showToast,
     ]
+  );
+
+  const handleMakeShiftForWholeFamily = useCallback(
+    (presetId: string, dateStr: string, note?: string | null) => {
+      if (!currentGroup?.id || !groupMembers?.length) return;
+
+      for (const m of groupMembers) {
+        applyShift({
+          groupId: currentGroup.id,
+          userId: m.id,
+          date: dateStr,
+          presetId,
+          note: note !== undefined ? note : null,
+        });
+      }
+
+      const preset = presets.find((p) => p.id === presetId);
+      const title = preset?.title || 'Směna';
+      showToast(`✓ ${title} nastavena pro celou rodinu`);
+    },
+    [currentGroup?.id, groupMembers, applyShift, presets, showToast]
   );
 
   const handleSaveShifts = useCallback(async () => {
@@ -750,7 +964,7 @@ export default function CalendarScreen() {
       const startDate = formatLocalDate(year, month - 1, 20);
       const endDate = formatLocalDate(year, month + 2, 10);
       const remoteShifts = await fetchGroupShiftsRange(currentGroup.id, startDate, endDate);
-      useShiftStore.getState().setShifts(remoteShifts);
+      useShiftStore.getState().setShifts(remoteShifts, startDate, endDate);
       showToast('Úpravy byly zrušeny');
     } catch (e) {
       console.warn('Failed to revert shifts:', e);
@@ -773,10 +987,27 @@ export default function CalendarScreen() {
     handleDayTapInEditMode(day);
   };
 
+  const handleAutoSaveOnMonthSwitch = useCallback(async () => {
+    if (!currentGroup?.id) return;
+    const hasPending = Object.keys(useShiftStore.getState().pendingChanges).length > 0;
+    if (!hasPending) return;
+
+    try {
+      const ok = await syncWithNeon(currentGroup.id);
+      if (ok) {
+        showToast('✓ Změny měsíce automaticky uloženy');
+      } else {
+        showToast('✓ Změny uloženy v paměti telefonu');
+      }
+    } catch (e) {
+      console.warn('Auto-save on month switch error:', e);
+    }
+  }, [currentGroup?.id, syncWithNeon, showToast]);
+
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: ui.bg }]}>
       {/* 1. Calendar Header (Month navigation, Sync badge, Group Code, Edit toggle) */}
-      <CalendarHeader onSave={handleSaveShifts} />
+      <CalendarHeader onSave={handleSaveShifts} onAutoSaveMonth={handleAutoSaveOnMonthSwitch} />
 
       {/* 2. Main Scrollable Calendar Grid (Never blocked by EditMode, zero layout jump) */}
       <ScrollView
@@ -796,6 +1027,7 @@ export default function CalendarScreen() {
           onDayPress={handleDayPress}
           renderCellContent={renderCellContent}
           renderCellBg={renderCellBg}
+          renderCellCorner={renderCellCorner}
           isDateSelected={isDateSelected}
           isEditMode={isEditMode}
           onRangeDragChange={handleRangeDragChange}
@@ -814,18 +1046,6 @@ export default function CalendarScreen() {
                 </Text>
               </View>
               <View style={styles.summaryActionsRight}>
-                {Array.isArray(hiddenMemberIds) && hiddenMemberIds.length > 0 && (
-                  <TouchableOpacity
-                    style={[styles.showAllBtnSmall, { borderColor: ui.border, backgroundColor: isDark ? '#161F33' : '#F1F5F9' }]}
-                    onPress={setAllMembersVisible}
-                    activeOpacity={0.75}
-                  >
-                    <Eye size={12} color={ui.accent} />
-                    <Text style={[styles.showAllBtnSmallText, { color: ui.accent }]}>
-                      Zobrazit vše ({hiddenMemberIds.length} skryto)
-                    </Text>
-                  </TouchableOpacity>
-                )}
                 <TouchableOpacity
                   style={[styles.addMemberBtnSmall, { borderColor: ui.border, backgroundColor: isDark ? '#161F33' : '#F1F5F9' }]}
                   onPress={() => setAddMemberModalVisible(true)}
@@ -969,6 +1189,44 @@ export default function CalendarScreen() {
                 </View>
               )}
 
+              {/* Shared Family Event Banner if all family members share the same preset */}
+              {(() => {
+                if (!selectedDayDetail || orderedMembers.length < 2) return null;
+                const visible = orderedMembers.filter((m) => !hiddenMemberIds.includes(m.id));
+                if (visible.length < 2) return null;
+                const firstShift = shifts[getShiftMapKey(visible[0].id, selectedDayDetail.dateStr)];
+                if (!firstShift?.shift_preset_id) return null;
+                const allSame = visible.every((m) => {
+                  const s = shifts[getShiftMapKey(m.id, selectedDayDetail.dateStr)];
+                  return s?.shift_preset_id === firstShift.shift_preset_id;
+                });
+                if (!allSame) return null;
+                const p = presets.find((pr) => pr.id === firstShift.shift_preset_id);
+                if (!p) return null;
+
+                return (
+                  <View
+                    style={[
+                      styles.modalFamilyBanner,
+                      {
+                        backgroundColor: isDark ? `${p.color}25` : `${p.color}16`,
+                        borderColor: p.color,
+                      },
+                    ]}
+                  >
+                    <Users size={16} color={p.color} />
+                    <View style={{ flex: 1 }}>
+                      <Text style={[styles.modalFamilyBannerTitle, { color: p.color }]}>
+                        Společná akce: {p.title}
+                      </Text>
+                      <Text style={[styles.modalFamilyBannerSub, { color: ui.textMuted }]}>
+                        Tato událost je zapsána pro celou rodinu
+                      </Text>
+                    </View>
+                  </View>
+                );
+              })()}
+
               {/* Members Shifts List for the Day */}
               <View style={styles.modalShiftsList}>
                 {orderedMembers.map((member) => {
@@ -1005,27 +1263,53 @@ export default function CalendarScreen() {
 
                         {/* Shift Badge or Off */}
                         {preset ? (
-                          <View
-                            style={[
-                              styles.modalShiftBadge,
-                              {
-                                backgroundColor: `${preset.color}20`,
-                                borderColor: preset.color,
-                              },
-                            ]}
-                          >
-                            <Text style={[styles.modalShiftTitle, { color: preset.color }]}>
-                              {preset.title}
-                            </Text>
-                            {preset.start_time && preset.end_time ? (
-                              <Text style={[styles.modalShiftTimes, { color: ui.textMuted }]}>
-                                {preset.start_time} – {preset.end_time} ({preset.hours}h)
+                          <View style={{ alignItems: 'flex-end', gap: 4 }}>
+                            <View
+                              style={[
+                                styles.modalShiftBadge,
+                                {
+                                  backgroundColor: `${preset.color}20`,
+                                  borderColor: preset.color,
+                                },
+                              ]}
+                            >
+                              <Text style={[styles.modalShiftTitle, { color: preset.color }]}>
+                                {preset.title}
                               </Text>
-                            ) : preset.hours !== undefined && preset.hours !== null && preset.hours > 0 ? (
-                              <Text style={[styles.modalShiftTimes, { color: ui.textMuted }]}>
-                                {preset.hours}h
+                              {preset.start_time && preset.end_time ? (
+                                <Text style={[styles.modalShiftTimes, { color: ui.textMuted }]}>
+                                  {preset.start_time} – {preset.end_time} ({preset.hours}h)
+                                </Text>
+                              ) : preset.hours !== undefined && preset.hours !== null && preset.hours > 0 ? (
+                                <Text style={[styles.modalShiftTimes, { color: ui.textMuted }]}>
+                                  {preset.hours}h
+                                </Text>
+                              ) : null}
+                            </View>
+
+                            {/* Quick Action: Make this shift for the whole family */}
+                            <TouchableOpacity
+                              style={[
+                                styles.modalQuickFamilyBtn,
+                                {
+                                  borderColor: ui.border,
+                                  backgroundColor: isDark ? '#161F33' : '#F1F5F9',
+                                },
+                              ]}
+                              onPress={() =>
+                                handleMakeShiftForWholeFamily(
+                                  preset.id,
+                                  selectedDayDetail.dateStr,
+                                  shift?.note
+                                )
+                              }
+                              activeOpacity={0.7}
+                            >
+                              <Users size={11} color="#8B5CF6" />
+                              <Text style={[styles.modalQuickFamilyBtnText, { color: isDark ? '#C4B5FD' : '#7C3AED' }]}>
+                                Zapsat celé rodině
                               </Text>
-                            ) : null}
+                            </TouchableOpacity>
                           </View>
                         ) : (
                           <Text style={[styles.noShiftText, { color: ui.textMuted }]}>
@@ -1475,6 +1759,40 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     textAlign: 'center',
   },
+  modalFamilyBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    marginTop: 8,
+    marginBottom: 6,
+  },
+  modalFamilyBannerTitle: {
+    fontSize: 13.5,
+    fontWeight: '800',
+  },
+  modalFamilyBannerSub: {
+    fontSize: 11,
+    fontWeight: '500',
+  },
+  modalQuickFamilyBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingVertical: 3.5,
+    paddingHorizontal: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    marginTop: 3,
+    alignSelf: 'flex-end',
+  },
+  modalQuickFamilyBtnText: {
+    fontSize: 10.5,
+    fontWeight: '700',
+  },
   summaryActionsRight: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1492,5 +1810,20 @@ const styles = StyleSheet.create({
   showAllBtnSmallText: {
     fontSize: 11.5,
     fontWeight: '700',
+  },
+  cornerNoteContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+  },
+  cornerNoteBadge: {
+    width: 5.5,
+    height: 5.5,
+    borderRadius: 2.75,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.25,
+    shadowRadius: 1,
+    elevation: 2,
   },
 });

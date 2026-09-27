@@ -16,9 +16,11 @@ export const WEEKDAY_NAMES_CS = WEEKDAY_NAMES_CS_MON;
  * Format local date as YYYY-MM-DD string without UTC offset skew.
  */
 export function formatLocalDate(year: number, month: number, day: number): string {
-  const m = String(month + 1).padStart(2, '0');
-  const d = String(day).padStart(2, '0');
-  return `${year}-${m}-${d}`;
+  const d = new Date(year, month, day, 12);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const dayStr = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${dayStr}`;
 }
 
 export function formatDateObj(date: Date): string {

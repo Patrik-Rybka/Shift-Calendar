@@ -94,7 +94,7 @@ import {
   updateGroupApprovalPolicy,
 } from '@/services/db/groupService';
 import type { DbShiftPreset } from '@/services/db/neonClient';
-import { DEFAULT_MEMBER_PERMISSIONS, type MemberPermissions } from '@/services/db/neonClient';
+import { DEFAULT_MEMBER_PERMISSIONS, FULL_PERMISSIONS, type MemberPermissions } from '@/services/db/neonClient';
 import type { DbUser } from '@/services/db/neonClient';
 
 function calculateShiftHours(startTime: string, endTime: string): number {
@@ -106,8 +106,10 @@ function calculateShiftHours(startTime: string, endTime: string): number {
   return Math.round((diffMinutes / 60) * 10) / 10;
 }
 
+export type BooleanPermissionKey = 'canViewCalendar' | 'canEditOwnShifts' | 'canEditAllShifts' | 'canAddNotes' | 'canManagePresets';
+
 const PERMISSION_ROWS: {
-  key: keyof MemberPermissions;
+  key: BooleanPermissionKey;
   label: string;
   sublabel: string;
   icon: React.ReactNode;
@@ -190,7 +192,12 @@ export default function SettingsScreen() {
     setFontSizeScale,
     calendarDensity,
     setCalendarDensity,
+    memberHiddenPresetIds,
+    setMemberPresetHidden,
+    resetMemberHiddenPresets,
   } = useSettingsStore();
+
+  const [selectedMemberPresetFilterId, setSelectedMemberPresetFilterId] = useState<string | null>(null);
 
   const allMemberIds = React.useMemo(() => groupMembers.map((m) => m.id), [groupMembers]);
   const orderedMembers = React.useMemo(() => {
@@ -442,7 +449,7 @@ export default function SettingsScreen() {
   };
 
   // ─── 7.3 Handlers: Permissions ───────────────────────────────────────────────
-  const handleTogglePermission = async (member: DbUser, key: keyof MemberPermissions, val: boolean) => {
+  const handleTogglePermission = async (member: DbUser, key: BooleanPermissionKey, val: boolean) => {
     if (member.role === 'admin') return;
     const current: MemberPermissions = member.permissions ?? DEFAULT_MEMBER_PERMISSIONS;
     const updated: MemberPermissions = { ...current, [key]: val };
@@ -494,6 +501,64 @@ export default function SettingsScreen() {
         },
       },
     ]);
+  };
+
+  // ─── 7.3 Handlers: Shift Preset Visibility per Member ─────────────────────────
+  const handleTogglePresetVisibilityForMember = async (
+    memberId: string,
+    presetId: string,
+    shouldBeVisible: boolean
+  ) => {
+    // 1. Update in local settings store (offline-first, instant response)
+    setMemberPresetHidden(memberId, presetId, !shouldBeVisible);
+
+    // 2. Persist to Neon DB in permissions JSONB column
+    const targetMember = groupMembers.find((m) => m.id === memberId);
+    if (targetMember) {
+      const currentPerms: MemberPermissions =
+        targetMember.permissions ??
+        (targetMember.role === 'admin' ? FULL_PERMISSIONS : DEFAULT_MEMBER_PERMISSIONS);
+      const prevHidden = currentPerms.hiddenPresetIds || [];
+      const newHidden = shouldBeVisible
+        ? prevHidden.filter((id) => id !== presetId)
+        : Array.from(new Set([...prevHidden, presetId]));
+
+      const updatedPerms: MemberPermissions = {
+        ...currentPerms,
+        hiddenPresetIds: newHidden,
+      };
+
+      try {
+        const result = await updateMemberPermissions(targetMember.id, updatedPerms);
+        if (result) {
+          setGroupMembers(groupMembers.map((m) => (m.id === result.id ? result : m)));
+        }
+      } catch (e) {
+        console.warn('Failed to sync preset visibility to Neon:', e);
+      }
+    }
+  };
+
+  const handleSetAllPresetsVisibleForMember = async (memberId: string) => {
+    resetMemberHiddenPresets(memberId);
+    const targetMember = groupMembers.find((m) => m.id === memberId);
+    if (targetMember) {
+      const currentPerms: MemberPermissions =
+        targetMember.permissions ??
+        (targetMember.role === 'admin' ? FULL_PERMISSIONS : DEFAULT_MEMBER_PERMISSIONS);
+      const updatedPerms: MemberPermissions = {
+        ...currentPerms,
+        hiddenPresetIds: [],
+      };
+      try {
+        const result = await updateMemberPermissions(targetMember.id, updatedPerms);
+        if (result) {
+          setGroupMembers(groupMembers.map((m) => (m.id === result.id ? result : m)));
+        }
+      } catch (e) {
+        console.warn('Failed to reset member hidden presets in Neon:', e);
+      }
+    }
   };
 
   // ─── 7.3 Handlers: Group Security ────────────────────────────────────────────
@@ -965,7 +1030,7 @@ export default function SettingsScreen() {
                                   <ActivityIndicator size="small" color={ui.accent} />
                                 ) : (
                                   <Switch
-                                    value={isOn}
+                                    value={Boolean(isOn)}
                                     onValueChange={(val) => handleTogglePermission(member, row.key, val)}
                                     disabled={mIsAdmin}
                                     trackColor={{ false: isDark ? '#334155' : '#CBD5E1', true: colorDot }}
@@ -1035,7 +1100,121 @@ export default function SettingsScreen() {
               )}
             </View>
 
-            {/* ── 7.3C: Group Security ── */}
+            {/* ── 7.3C: Viditelnost typů směn pro členy rodiny (Special Admin Setting) ── */}
+            <View style={styles.subsection}>
+              <View style={styles.subsectionHeader}>
+                <Sliders size={15} color={ui.textMuted} />
+                <Text style={[styles.subsectionTitle, { color: ui.text }]}>
+                  Viditelnost směn pro členy
+                </Text>
+              </View>
+              <Text style={[styles.sectionDesc, { color: ui.textMuted, marginBottom: 12 }]}>
+                Zvolte, které typy směn má každý člen k dispozici v nabídce při zadávání do kalendáře. Směny, které daný člen nepracuje (např. denní či noční), můžete vypnout, aby nepřekážely.
+              </Text>
+
+              {/* Member Selector Chips */}
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.memberFilterScroll}>
+                {groupMembers.map((m) => {
+                  const isSelected = m.id === (selectedMemberPresetFilterId || currentUser?.id || groupMembers[0]?.id);
+                  const isMe = m.id === currentUser?.id;
+                  return (
+                    <TouchableOpacity
+                      key={m.id}
+                      style={[
+                        styles.memberFilterChip,
+                        {
+                          backgroundColor: isSelected ? (isDark ? 'rgba(59,130,246,0.22)' : '#EFF6FF') : ui.card,
+                          borderColor: isSelected ? ui.accent : ui.border,
+                        },
+                      ]}
+                      onPress={() => setSelectedMemberPresetFilterId(m.id)}
+                      activeOpacity={0.7}
+                    >
+                      <View style={[styles.memberFilterAvatar, { backgroundColor: m.color || ui.accent }]}>
+                        <Text style={styles.memberFilterAvatarText}>{m.display_name?.charAt(0).toUpperCase() || '?'}</Text>
+                      </View>
+                      <Text style={[styles.memberFilterName, { color: isSelected ? ui.accent : ui.text, fontWeight: isSelected ? '800' : '600' }]}>
+                        {m.display_name}{isMe ? ' (Já)' : ''}
+                      </Text>
+                      {m.role === 'admin' && <Crown size={10} color={ui.adminColor} style={{ marginLeft: 3 }} />}
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+
+              {/* Preset Visibility Card for Active Member */}
+              {(() => {
+                const activeFilterId = selectedMemberPresetFilterId || currentUser?.id || groupMembers[0]?.id || '';
+                const activeMemberObj = groupMembers.find((m) => m.id === activeFilterId) || currentUser;
+                const hiddenList =
+                  (activeMemberObj && 'permissions' in activeMemberObj && activeMemberObj.permissions?.hiddenPresetIds) ||
+                  memberHiddenPresetIds[activeFilterId] ||
+                  [];
+
+                return (
+                  <View style={[styles.presetVisibilityCard, { backgroundColor: ui.card, borderColor: ui.border }]}>
+                    <View style={[styles.presetVisibilityCardHeader, { borderBottomColor: ui.border }]}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={[styles.presetVisibilityTitle, { color: ui.text }]}>
+                          Směny pro člena: {activeMemberObj?.display_name || 'Člen'}
+                        </Text>
+                        <Text style={[styles.presetVisibilitySubtitle, { color: ui.textMuted }]}>
+                          Aktivní směny se zobrazují v jeho nabídce
+                        </Text>
+                      </View>
+                      <TouchableOpacity
+                        style={[styles.resetPresetsBtn, { backgroundColor: ui.inputBg, borderColor: ui.border }]}
+                        onPress={() => handleSetAllPresetsVisibleForMember(activeFilterId)}
+                        activeOpacity={0.7}
+                      >
+                        <Text style={[styles.resetPresetsBtnText, { color: ui.accent }]}>Povolit vše</Text>
+                      </TouchableOpacity>
+                    </View>
+
+                    <View style={styles.presetVisibilityList}>
+                      {presets.map((preset) => {
+                        const isVisible = !hiddenList.includes(preset.id);
+                        const hasTimes = Boolean(preset.start_time && preset.end_time);
+
+                        return (
+                          <View key={preset.id} style={[styles.presetVisibilityRow, { borderBottomColor: ui.border }]}>
+                            <View style={[styles.presetVisibilityColorDot, { backgroundColor: preset.color }]} />
+                            <View style={{ flex: 1, gap: 1 }}>
+                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                                <Text style={[styles.presetVisibilityRowTitle, { color: ui.text }]}>{preset.title}</Text>
+                                {hasTimes && preset.hours > 0 && (
+                                  <View style={[styles.hoursBadgeSmall, { backgroundColor: `${preset.color}18`, borderColor: `${preset.color}35` }]}>
+                                    <Text style={[styles.hoursBadgeSmallText, { color: preset.color }]}>{preset.hours}h</Text>
+                                  </View>
+                                )}
+                              </View>
+                              <Text style={[styles.presetVisibilityRowSubtitle, { color: isVisible ? ui.successText : ui.textMuted }]}>
+                                {isVisible
+                                  ? (hasTimes ? `${preset.start_time} – ${preset.end_time} • Povoleno v nabídce` : 'Povoleno v nabídce')
+                                  : 'Skryto v nabídce pro tohoto člena'}
+                              </Text>
+                            </View>
+                            <Switch
+                              value={isVisible}
+                              onValueChange={(val) => handleTogglePresetVisibilityForMember(activeFilterId, preset.id, val)}
+                              trackColor={{ false: isDark ? '#334155' : '#CBD5E1', true: preset.color || ui.accent }}
+                              thumbColor="#FFFFFF"
+                            />
+                          </View>
+                        );
+                      })}
+                      {presets.length === 0 && (
+                        <View style={{ paddingVertical: 16, alignItems: 'center' }}>
+                          <Text style={{ color: ui.textMuted, fontSize: 13 }}>Zatím nejsou vytvořeny žádné předvolby směn.</Text>
+                        </View>
+                      )}
+                    </View>
+                  </View>
+                );
+              })()}
+            </View>
+
+            {/* ── 7.3D: Group Security ── */}
             <View style={styles.subsection}>
               <View style={styles.subsectionHeader}>
                 <KeyRound size={15} color={ui.textMuted} />
@@ -2624,6 +2803,27 @@ const styles = StyleSheet.create({
   permActionsRow: { flexDirection: 'row', gap: 8, marginTop: 12 },
   permActionBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 9, paddingHorizontal: 8, borderRadius: 10, borderWidth: 1.5 },
   permActionBtnText: { fontSize: 11.5, fontWeight: '700' },
+
+  // Presets Visibility per Member (7.3C)
+  memberFilterScroll: { flexDirection: 'row', gap: 8, paddingBottom: 10 },
+  memberFilterChip: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 6, paddingHorizontal: 10, borderRadius: 20, borderWidth: 1.5 },
+  memberFilterAvatar: { width: 22, height: 22, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
+  memberFilterAvatarText: { color: '#FFFFFF', fontSize: 10, fontWeight: '800' },
+  memberFilterName: { fontSize: 12.5 },
+  presetVisibilityCard: { borderRadius: 14, borderWidth: 1, overflow: 'hidden', shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.04, shadowRadius: 3, elevation: 1 },
+  presetVisibilityCardHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 12, borderBottomWidth: StyleSheet.hairlineWidth },
+  presetVisibilityTitle: { fontSize: 13.5, fontWeight: '700' },
+  presetVisibilitySubtitle: { fontSize: 11, fontWeight: '500', marginTop: 2 },
+  resetPresetsBtn: { paddingHorizontal: 9, paddingVertical: 5, borderRadius: 8, borderWidth: 1 },
+  resetPresetsBtnText: { fontSize: 11.5, fontWeight: '700' },
+  presetVisibilityList: { paddingHorizontal: 12 },
+  presetVisibilityRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth, gap: 10 },
+  presetVisibilityColorDot: { width: 10, height: 10, borderRadius: 5 },
+  presetVisibilityRowTitle: { fontSize: 13.5, fontWeight: '700' },
+  presetVisibilityRowSubtitle: { fontSize: 11, fontWeight: '500' },
+  hoursBadgeSmall: { paddingHorizontal: 5, paddingVertical: 1, borderRadius: 5, borderWidth: 1 },
+  hoursBadgeSmallText: { fontSize: 10, fontWeight: '800' },
+
   emptyHint: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 14, borderRadius: 13, borderWidth: 1 },
   emptyHintText: { flex: 1, fontSize: 12.5, fontWeight: '500', lineHeight: 18 },
 

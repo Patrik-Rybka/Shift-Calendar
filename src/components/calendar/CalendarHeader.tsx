@@ -1,10 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
   Text,
   TouchableOpacity,
   StyleSheet,
   ActivityIndicator,
+  Animated,
 } from 'react-native';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import * as Clipboard from 'expo-clipboard';
@@ -41,9 +42,10 @@ const CZECH_MONTHS = [
 
 interface CalendarHeaderProps {
   onSave?: () => Promise<void>;
+  onAutoSaveMonth?: () => Promise<void>;
 }
 
-export default function CalendarHeader({ onSave }: CalendarHeaderProps) {
+export default function CalendarHeader({ onSave, onAutoSaveMonth }: CalendarHeaderProps) {
   const router = useRouter();
   const isDark = useColorScheme() === 'dark';
 
@@ -60,10 +62,40 @@ export default function CalendarHeader({ onSave }: CalendarHeaderProps) {
     setEditingUserId,
     syncStatus,
     syncWithNeon,
+    pendingChanges,
   } = useShiftStore();
 
   const [copied, setCopied] = useState(false);
   const [syncingManual, setSyncingManual] = useState(false);
+
+  const pendingCount = Object.keys(pendingChanges || {}).length;
+  const hasPending = isEditMode && pendingCount > 0;
+
+  // Gentle pulse animation when changes are waiting to be saved
+  const pulseAnim = useRef(new Animated.Value(1)).current;
+
+  useEffect(() => {
+    if (hasPending) {
+      const loop = Animated.loop(
+        Animated.sequence([
+          Animated.timing(pulseAnim, {
+            toValue: 1.08,
+            duration: 650,
+            useNativeDriver: true,
+          }),
+          Animated.timing(pulseAnim, {
+            toValue: 1,
+            duration: 650,
+            useNativeDriver: true,
+          }),
+        ])
+      );
+      loop.start();
+      return () => loop.stop();
+    } else {
+      pulseAnim.setValue(1);
+    }
+  }, [hasPending]);
 
   const ui = {
     bg: isDark ? '#090D16' : '#F8FAFC',
@@ -170,6 +202,39 @@ export default function CalendarHeader({ onSave }: CalendarHeaderProps) {
     );
   };
 
+  const handlePrevMonth = async () => {
+    if (isEditMode && hasPending) {
+      if (onAutoSaveMonth) {
+        await onAutoSaveMonth();
+      } else if (onSave) {
+        await onSave();
+      }
+    }
+    prevMonth();
+  };
+
+  const handleNextMonth = async () => {
+    if (isEditMode && hasPending) {
+      if (onAutoSaveMonth) {
+        await onAutoSaveMonth();
+      } else if (onSave) {
+        await onSave();
+      }
+    }
+    nextMonth();
+  };
+
+  const handleTodayMonth = async () => {
+    if (isEditMode && hasPending) {
+      if (onAutoSaveMonth) {
+        await onAutoSaveMonth();
+      } else if (onSave) {
+        await onSave();
+      }
+    }
+    setCurrentMonth(new Date());
+  };
+
   return (
     <View style={styles.container}>
       {/* Top Status & Quick Bar */}
@@ -205,34 +270,43 @@ export default function CalendarHeader({ onSave }: CalendarHeaderProps) {
           </TouchableOpacity>
 
           {/* Edit / Save Toggle Button */}
-          <TouchableOpacity
-            style={[
-              styles.editButton,
-              isEditMode
-                ? { backgroundColor: ui.editActiveBg }
-                : { backgroundColor: ui.accent },
-              isEditMode && syncStatus === 'syncing' && { opacity: 0.8 },
-            ]}
-            activeOpacity={0.85}
-            disabled={isEditMode && syncStatus === 'syncing'}
-            onPress={handleEditToggle}
-          >
-            {isEditMode ? (
-              syncStatus === 'syncing' ? (
-                <ActivityIndicator size="small" color="#FFFFFF" style={{ paddingHorizontal: 10 }} />
+          <Animated.View style={{ transform: [{ scale: pulseAnim }] }}>
+            <TouchableOpacity
+              style={[
+                styles.editButton,
+                isEditMode
+                  ? hasPending
+                    ? styles.editButtonPending
+                    : { backgroundColor: ui.editActiveBg }
+                  : { backgroundColor: ui.accent },
+                isEditMode && syncStatus === 'syncing' && { opacity: 0.8 },
+              ]}
+              activeOpacity={0.85}
+              disabled={isEditMode && syncStatus === 'syncing'}
+              onPress={handleEditToggle}
+            >
+              {isEditMode ? (
+                syncStatus === 'syncing' ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" style={{ paddingHorizontal: 10 }} />
+                ) : (
+                  <>
+                    <Save size={15} color="#FFFFFF" strokeWidth={2.5} />
+                    <Text style={styles.editButtonText}>Uložit</Text>
+                    {hasPending && (
+                      <View style={styles.pendingBadgeCircle}>
+                        <Text style={styles.pendingBadgeCircleText}>{pendingCount}</Text>
+                      </View>
+                    )}
+                  </>
+                )
               ) : (
                 <>
-                  <Save size={15} color="#FFFFFF" strokeWidth={2.5} />
-                  <Text style={styles.editButtonText}>Uložit</Text>
+                  <Pencil size={15} color="#FFFFFF" strokeWidth={2.5} />
+                  <Text style={styles.editButtonText}>Upravit</Text>
                 </>
-              )
-            ) : (
-              <>
-                <Pencil size={15} color="#FFFFFF" strokeWidth={2.5} />
-                <Text style={styles.editButtonText}>Upravit</Text>
-              </>
-            )}
-          </TouchableOpacity>
+              )}
+            </TouchableOpacity>
+          </Animated.View>
         </View>
       </View>
 
@@ -240,7 +314,7 @@ export default function CalendarHeader({ onSave }: CalendarHeaderProps) {
       <View style={[styles.navCard, { backgroundColor: ui.card, borderColor: ui.border }]}>
         <TouchableOpacity
           style={[styles.navArrow, { backgroundColor: ui.badgeBg }]}
-          onPress={prevMonth}
+          onPress={handlePrevMonth}
           hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
         >
           <ChevronLeft size={20} color={ui.text} />
@@ -254,7 +328,7 @@ export default function CalendarHeader({ onSave }: CalendarHeaderProps) {
           {!isCurrentMonthNow && (
             <TouchableOpacity
               style={[styles.todayButton, { backgroundColor: ui.accentLight }]}
-              onPress={() => setCurrentMonth(new Date())}
+              onPress={handleTodayMonth}
             >
               <Text style={[styles.todayButtonText, { color: ui.accent }]}>Dnes</Text>
             </TouchableOpacity>
@@ -263,7 +337,7 @@ export default function CalendarHeader({ onSave }: CalendarHeaderProps) {
 
         <TouchableOpacity
           style={[styles.navArrow, { backgroundColor: ui.badgeBg }]}
-          onPress={nextMonth}
+          onPress={handleNextMonth}
           hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
         >
           <ChevronRight size={20} color={ui.text} />
@@ -351,6 +425,33 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 13.5,
     fontWeight: '700',
+  },
+  editButtonPending: {
+    backgroundColor: '#059669',
+    shadowColor: '#10B981',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.75,
+    shadowRadius: 8,
+    elevation: 8,
+    borderWidth: 1.5,
+    borderColor: '#6EE7B7',
+  },
+  pendingBadgeCircle: {
+    backgroundColor: '#DC2626',
+    borderRadius: 8,
+    minWidth: 16,
+    height: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 3,
+    marginLeft: 3,
+    borderWidth: 1,
+    borderColor: '#FFFFFF',
+  },
+  pendingBadgeCircleText: {
+    color: '#FFFFFF',
+    fontSize: 9.5,
+    fontWeight: '800',
   },
   navCard: {
     flexDirection: 'row',

@@ -25,6 +25,8 @@ export interface MemberPermissions {
   canAddNotes: boolean;
   /** Can create, edit and delete shift presets */
   canManagePresets: boolean;
+  /** IDs of shift presets hidden for this member (configured by admin) */
+  hiddenPresetIds?: string[];
 }
 
 /** Default permissions granted to a newly joined / approved member. */

@@ -104,6 +104,6 @@ export async function fetchGroupShiftsRange(
     return (result || []) as DbShift[];
   } catch (error) {
     console.error('Failed to fetch shifts range:', error);
-    return [];
+    throw error;
   }
 }

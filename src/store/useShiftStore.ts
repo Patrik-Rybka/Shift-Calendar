@@ -47,7 +47,7 @@ export interface ShiftState {
 
   // Actions
   setPresets: (presets: DbShiftPreset[]) => void;
-  setShifts: (shiftsList: DbShift[]) => void;
+  setShifts: (shiftsList: DbShift[], rangeStart?: string, rangeEnd?: string) => void;
   setCurrentMonth: (date: Date) => void;
   nextMonth: () => void;
   prevMonth: () => void;
@@ -97,20 +97,35 @@ export const useShiftStore = create<ShiftState>()(
 
       setPresets: (presets) => set({ presets }),
 
-      setShifts: (shiftsList) => {
-        const shiftMap: Record<string, DbShift> = {};
-        for (const shift of shiftsList) {
-          const dateStr = typeof shift.date === 'string' 
-            ? shift.date.split('T')[0] 
-            : new Date(shift.date).toISOString().split('T')[0];
-          
-          const key = getShiftMapKey(shift.user_id, dateStr);
-          shiftMap[key] = {
-            ...shift,
-            date: dateStr,
-          };
-        }
-        set({ shifts: shiftMap });
+      setShifts: (shiftsList, rangeStart, rangeEnd) => {
+        set((state) => {
+          let shiftMap: Record<string, DbShift>;
+          if (rangeStart && rangeEnd) {
+            shiftMap = { ...state.shifts };
+            for (const [key, s] of Object.entries(shiftMap)) {
+              if (s.date >= rangeStart && s.date <= rangeEnd) {
+                delete shiftMap[key];
+              }
+            }
+          } else if (shiftsList.length === 0) {
+            shiftMap = {};
+          } else {
+            shiftMap = { ...state.shifts };
+          }
+
+          for (const shift of shiftsList) {
+            const dateStr = typeof shift.date === 'string' 
+              ? shift.date.split('T')[0] 
+              : new Date(shift.date).toISOString().split('T')[0];
+            
+            const key = getShiftMapKey(shift.user_id, dateStr);
+            shiftMap[key] = {
+              ...shift,
+              date: dateStr,
+            };
+          }
+          return { shifts: shiftMap };
+        });
       },
 
       setCurrentMonth: (date) => {
@@ -262,7 +277,7 @@ export const useShiftStore = create<ShiftState>()(
           const endDate = formatLocalDate(year, month + 2, 10);
 
           const remoteShifts = await fetchGroupShiftsRange(groupId, startDate, endDate);
-          get().setShifts(remoteShifts);
+          get().setShifts(remoteShifts, startDate, endDate);
 
           const now = new Date().toISOString();
           set({

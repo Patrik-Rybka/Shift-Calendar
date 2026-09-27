@@ -22,6 +22,7 @@ interface CalendarGridProps {
   onDayLongPress?: (day: CalendarDay) => void;
   renderCellContent?: (day: CalendarDay) => React.ReactNode;
   renderCellBg?: (day: CalendarDay) => React.ReactNode;
+  renderCellCorner?: (day: CalendarDay) => React.ReactNode;
   isDateSelected?: (dateStr: string) => boolean;
   isEditMode?: boolean;
   onRangeDragChange?: (startDateStr: string, endDateStr: string) => void;
@@ -34,6 +35,7 @@ export default function CalendarGrid({
   onDayLongPress,
   renderCellContent,
   renderCellBg,
+  renderCellCorner,
   isDateSelected,
   isEditMode = false,
   onRangeDragChange,
@@ -298,6 +300,13 @@ export default function CalendarGrid({
                       {/* Optional custom background (e.g. full-fill or 50/50 split) */}
                       {renderCellBg && renderCellBg(day)}
 
+                      {/* Optional corner indicator (e.g. subtle note indicator) */}
+                      {renderCellCorner && (
+                        <View style={styles.cellCornerSlot} pointerEvents="none">
+                          {renderCellCorner(day)}
+                        </View>
+                      )}
+
                       {/* Modern fluid ribbon background behind selected cells */}
                       {isSelected && (
                         <View
@@ -464,6 +473,12 @@ const styles = StyleSheet.create({
   dayNumberRow: {
     alignItems: 'center',
     marginBottom: 3,
+  },
+  cellCornerSlot: {
+    position: 'absolute',
+    top: 4,
+    right: 4,
+    zIndex: 5,
   },
   dayNumberText: {
     fontSize: 14.5,

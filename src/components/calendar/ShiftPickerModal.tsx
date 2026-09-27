@@ -29,6 +29,7 @@ import {
 } from 'lucide-react-native';
 import { useShiftStore } from '@/store/useShiftStore';
 import { useAuthStore } from '@/store/useAuthStore';
+import { useSettingsStore } from '@/store/useSettingsStore';
 import { ShiftPalette as PaletteColors } from '@/constants/theme';
 import { createCustomPreset } from '@/services/db/shiftService';
 
@@ -75,7 +76,7 @@ export default function ShiftPickerModal({
 }: ShiftPickerModalProps) {
   const isDark = useColorScheme() === 'dark';
   const { currentGroup, currentUser, groupMembers } = useAuthStore();
-  const { presets, setPresets, editingUserId } = useShiftStore();
+  const { presets, setPresets, editingUserId, setEditingUserId } = useShiftStore();
 
   const [createModalVisible, setCreateModalVisible] = useState(false);
   const [newTitle, setNewTitle] = useState('');
@@ -95,11 +96,27 @@ export default function ShiftPickerModal({
     }
   }, [visible, initialNote]);
 
-  const activeUserId = editingUserId || currentUser?.id;
-  const activeMember = groupMembers.find((m) => m.id === activeUserId) || currentUser;
+  const { memberHiddenPresetIds } = useSettingsStore();
+  const isAllFamily = editingUserId === '__ALL__';
+  const activeUserId = isAllFamily ? '__ALL__' : (editingUserId || currentUser?.id);
+  const activeMember = isAllFamily
+    ? null
+    : (groupMembers.find((m) => m.id === activeUserId) || currentUser);
 
-  // Filter: show shared presets (user_id is null) + personal presets of this active member
-  const visiblePresets = presets.filter((p) => !p.user_id || p.user_id === activeUserId);
+  // Filter: show shared presets + personal presets of this active member,
+  // excluding presets explicitly hidden for this member by admin.
+  // When whole family is selected, show all available presets.
+  const hiddenPresetIds =
+    (!isAllFamily && activeMember && 'permissions' in activeMember && activeMember.permissions?.hiddenPresetIds) ||
+    (!isAllFamily && activeUserId ? memberHiddenPresetIds[activeUserId] : []) ||
+    [];
+
+  const visiblePresets = presets.filter((p) => {
+    if (isAllFamily) return true;
+    if (p.user_id && p.user_id !== activeUserId) return false;
+    if (hiddenPresetIds.includes(p.id)) return false;
+    return true;
+  });
 
   const ui = {
     bg: isDark ? '#090D16' : '#F8FAFC',
@@ -128,7 +145,7 @@ export default function ShiftPickerModal({
     try {
       const created = await createCustomPreset({
         groupId: currentGroup.id,
-        userId: newIsPersonal ? (activeUserId || null) : null,
+        userId: isAllFamily ? null : (newIsPersonal ? (activeUserId || null) : null),
         title: newTitle.trim(),
         startTime: newHasSpecificTime ? newStart.trim() || null : null,
         endTime: newHasSpecificTime ? newEnd.trim() || null : null,
@@ -180,27 +197,139 @@ export default function ShiftPickerModal({
           </TouchableOpacity>
         </View>
 
-        {/* Person Info Strip */}
+        {/* Person Info Strip & Member Switcher */}
         <View style={[styles.personStrip, { backgroundColor: ui.card, borderColor: ui.border }]}>
-          <View style={styles.personStripLeft}>
-            <View style={[styles.personAvatar, { backgroundColor: activeMember?.color || '#3B82F6' }]}>
-              <Text style={styles.personAvatarText}>
-                {activeMember?.display_name?.charAt(0).toUpperCase() || 'U'}
-              </Text>
+          <View style={styles.personStripTopRow}>
+            <View style={styles.personStripLeft}>
+              {isAllFamily ? (
+                <View style={[styles.personAvatar, { backgroundColor: '#8B5CF6' }]}>
+                  <Users size={17} color="#FFFFFF" />
+                </View>
+              ) : (
+                <View style={[styles.personAvatar, { backgroundColor: activeMember?.color || '#3B82F6' }]}>
+                  <Text style={styles.personAvatarText}>
+                    {activeMember?.display_name?.charAt(0).toUpperCase() || 'U'}
+                  </Text>
+                </View>
+              )}
+              <View>
+                <Text style={[styles.personStripLabel, { color: ui.textMuted }]}>
+                  {isAllFamily ? 'Zapisuji společnou akci pro' : 'Zapisuji směnu pro'}
+                </Text>
+                <Text style={[styles.personStripName, { color: ui.text }]}>
+                  {isAllFamily ? (
+                    'Celá rodina (všichni)'
+                  ) : (
+                    <>
+                      {activeMember?.display_name || 'Uživatel'}{' '}
+                      {activeMember?.id === currentUser?.id && '(Vy)'}
+                    </>
+                  )}
+                </Text>
+              </View>
             </View>
-            <View>
-              <Text style={[styles.personStripLabel, { color: ui.textMuted }]}>Zapisuji směnu pro</Text>
-              <Text style={[styles.personStripName, { color: ui.text }]}>
-                {activeMember?.display_name || 'Uživatel'}{' '}
-                {activeMember?.id === currentUser?.id && '(Vy)'}
-              </Text>
-            </View>
+
+            {isAllFamily ? (
+              <View style={[styles.adminBadge, { backgroundColor: 'rgba(139, 92, 246, 0.16)' }]}>
+                <Users size={12} color="#8B5CF6" />
+                <Text style={[styles.adminBadgeText, { color: '#8B5CF6' }]}>Společné</Text>
+              </View>
+            ) : activeMember?.role === 'admin' ? (
+              <View style={styles.adminBadge}>
+                <Crown size={12} color="#F59E0B" />
+                <Text style={styles.adminBadgeText}>Správce</Text>
+              </View>
+            ) : null}
           </View>
 
-          {activeMember?.role === 'admin' && (
-            <View style={styles.adminBadge}>
-              <Crown size={12} color="#F59E0B" />
-              <Text style={styles.adminBadgeText}>Správce</Text>
+          {/* Member Switcher Chips (Allows changing who you are recording for directly inside modal) */}
+          {groupMembers.length > 1 && (
+            <View style={[styles.memberSwitcherContainer, { borderTopColor: ui.border }]}>
+              <Text style={[styles.memberSwitcherLabel, { color: ui.textMuted }]}>
+                Zvolit pro koho zapsat:
+              </Text>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.memberSwitcherScroll}
+              >
+                {/* 1. Whole Family Chip (All members) */}
+                <TouchableOpacity
+                  style={[
+                    styles.memberSwitcherChip,
+                    {
+                      backgroundColor: isAllFamily
+                        ? (isDark ? 'rgba(139, 92, 246, 0.28)' : '#EDE9FE')
+                        : (isDark ? '#161F33' : '#F1F5F9'),
+                      borderColor: isAllFamily ? '#8B5CF6' : ui.border,
+                    },
+                  ]}
+                  onPress={() => setEditingUserId('__ALL__')}
+                  activeOpacity={0.7}
+                >
+                  <View style={[styles.memberSwitcherAvatar, { backgroundColor: '#8B5CF6' }]}>
+                    <Users size={11} color="#FFFFFF" />
+                  </View>
+                  <Text
+                    style={[
+                      styles.memberSwitcherName,
+                      {
+                        color: isAllFamily ? '#8B5CF6' : ui.text,
+                        fontWeight: isAllFamily ? '800' : '600',
+                      },
+                    ]}
+                  >
+                    Celá rodina
+                  </Text>
+                  {isAllFamily && (
+                    <Check size={11} color="#8B5CF6" strokeWidth={2.5} style={{ marginLeft: 2 }} />
+                  )}
+                </TouchableOpacity>
+
+                {/* 2. Individual Members */}
+                {groupMembers.map((member) => {
+                  const isSelected = !isAllFamily && member.id === activeUserId;
+                  const isMe = member.id === currentUser?.id;
+                  const mColor = member.color || '#3B82F6';
+
+                  return (
+                    <TouchableOpacity
+                      key={member.id}
+                      style={[
+                        styles.memberSwitcherChip,
+                        {
+                          backgroundColor: isSelected
+                            ? (isDark ? 'rgba(59,130,246,0.22)' : '#EFF6FF')
+                            : (isDark ? '#161F33' : '#F1F5F9'),
+                          borderColor: isSelected ? ui.accent : ui.border,
+                        },
+                      ]}
+                      onPress={() => setEditingUserId(member.id)}
+                      activeOpacity={0.7}
+                    >
+                      <View style={[styles.memberSwitcherAvatar, { backgroundColor: mColor }]}>
+                        <Text style={styles.memberSwitcherAvatarText}>
+                          {member.display_name?.charAt(0).toUpperCase() || '?'}
+                        </Text>
+                      </View>
+                      <Text
+                        style={[
+                          styles.memberSwitcherName,
+                          {
+                            color: isSelected ? ui.accent : ui.text,
+                            fontWeight: isSelected ? '800' : '600',
+                          },
+                        ]}
+                      >
+                        {member.display_name}{isMe ? ' (Vy)' : ''}
+                      </Text>
+                      {isSelected && (
+                        <Check size={11} color={ui.accent} strokeWidth={2.5} style={{ marginLeft: 2 }} />
+                      )}
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
             </View>
           )}
         </View>
@@ -615,9 +744,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   personStrip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
     marginHorizontal: 16,
     marginTop: 12,
     marginBottom: 8,
@@ -625,6 +751,53 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderRadius: 16,
     borderWidth: 1,
+    gap: 8,
+  },
+  personStripTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  memberSwitcherContainer: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    paddingTop: 8,
+    marginTop: 2,
+    gap: 6,
+  },
+  memberSwitcherLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.3,
+  },
+  memberSwitcherScroll: {
+    flexDirection: 'row',
+    gap: 6,
+    paddingVertical: 2,
+  },
+  memberSwitcherChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 5,
+    paddingHorizontal: 9,
+    borderRadius: 16,
+    borderWidth: 1.5,
+  },
+  memberSwitcherAvatar: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  memberSwitcherAvatarText: {
+    color: '#FFFFFF',
+    fontSize: 10,
+    fontWeight: '800',
+  },
+  memberSwitcherName: {
+    fontSize: 12,
   },
   personStripLeft: {
     flexDirection: 'row',

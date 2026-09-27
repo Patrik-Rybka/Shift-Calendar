@@ -63,6 +63,11 @@ export interface SettingsState {
   /** Calendar day cell height / layout density: 'comfortable' | 'compact' */
   calendarDensity: CalendarDensity;
   setCalendarDensity: (density: CalendarDensity) => void;
+
+  /** Map of memberId -> array of shift preset IDs hidden for that member */
+  memberHiddenPresetIds: Record<string, string[]>;
+  setMemberPresetHidden: (memberId: string, presetId: string, hidden: boolean) => void;
+  resetMemberHiddenPresets: (memberId: string) => void;
 }
 
 export const useSettingsStore = create<SettingsState>()(
@@ -87,6 +92,36 @@ export const useSettingsStore = create<SettingsState>()(
       themeMode: 'system',
       fontSizeScale: 'medium',
       calendarDensity: 'comfortable',
+      memberHiddenPresetIds: {},
+
+      setMemberPresetHidden: (memberId, presetId, hidden) => {
+        const currentMap = get().memberHiddenPresetIds || {};
+        const memberList = currentMap[memberId] || [];
+        if (hidden) {
+          if (!memberList.includes(presetId)) {
+            set({
+              memberHiddenPresetIds: {
+                ...currentMap,
+                [memberId]: [...memberList, presetId],
+              },
+            });
+          }
+        } else {
+          set({
+            memberHiddenPresetIds: {
+              ...currentMap,
+              [memberId]: memberList.filter((id) => id !== presetId),
+            },
+          });
+        }
+      },
+
+      resetMemberHiddenPresets: (memberId) => {
+        const currentMap = get().memberHiddenPresetIds || {};
+        const updated = { ...currentMap };
+        delete updated[memberId];
+        set({ memberHiddenPresetIds: updated });
+      },
 
       setCellStyle: (cellStyle) => set({ cellStyle }),
       setFirstDayOfWeek: (firstDayOfWeek) => set({ firstDayOfWeek }),

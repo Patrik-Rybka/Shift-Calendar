@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -8,6 +8,7 @@ import {
   ActivityIndicator,
   Alert,
   Platform,
+  Animated,
 } from 'react-native';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -61,6 +62,33 @@ export default function EditToolbar({ onSave, onCancel, onOpenAddMember }: EditT
 
   const currentEditingId = editingUserId || currentUser?.id;
   const isSaving = syncStatus === 'syncing';
+  const pendingCount = Object.keys(pendingChanges || {}).length;
+  const hasPending = pendingCount > 0;
+
+  const pulseAnim = useRef(new Animated.Value(1)).current;
+
+  useEffect(() => {
+    if (hasPending) {
+      const loop = Animated.loop(
+        Animated.sequence([
+          Animated.timing(pulseAnim, {
+            toValue: 1.07,
+            duration: 650,
+            useNativeDriver: true,
+          }),
+          Animated.timing(pulseAnim, {
+            toValue: 1,
+            duration: 650,
+            useNativeDriver: true,
+          }),
+        ])
+      );
+      loop.start();
+      return () => loop.stop();
+    } else {
+      pulseAnim.setValue(1);
+    }
+  }, [hasPending]);
 
   const ui = {
     barBg: isDark ? '#111827' : '#FFFFFF',
@@ -74,7 +102,6 @@ export default function EditToolbar({ onSave, onCancel, onOpenAddMember }: EditT
 
   const handleCancel = () => {
     if (isSaving) return;
-    const hasPending = Object.keys(pendingChanges).length > 0;
     if (hasPending) {
       Alert.alert(
         'Zahodit neuložené změny?',
@@ -140,21 +167,32 @@ export default function EditToolbar({ onSave, onCancel, onOpenAddMember }: EditT
             <Text style={[styles.cancelBtnText, { color: ui.textMuted }]}>Zrušit</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity
-            style={[styles.saveBtn, { backgroundColor: ui.saveBg }, isSaving && { opacity: 0.8 }]}
-            activeOpacity={0.85}
-            disabled={isSaving}
-            onPress={handleSave}
-          >
-            {isSaving ? (
-              <ActivityIndicator size="small" color="#FFFFFF" style={{ paddingHorizontal: 10 }} />
-            ) : (
-              <>
-                <Save size={14} color="#FFFFFF" strokeWidth={2.5} />
-                <Text style={styles.saveBtnText}>Uložit</Text>
-              </>
-            )}
-          </TouchableOpacity>
+          <Animated.View style={{ transform: [{ scale: pulseAnim }] }}>
+            <TouchableOpacity
+              style={[
+                styles.saveBtn,
+                hasPending ? styles.saveBtnPending : { backgroundColor: ui.saveBg },
+                isSaving && { opacity: 0.8 },
+              ]}
+              activeOpacity={0.85}
+              disabled={isSaving}
+              onPress={handleSave}
+            >
+              {isSaving ? (
+                <ActivityIndicator size="small" color="#FFFFFF" style={{ paddingHorizontal: 10 }} />
+              ) : (
+                <>
+                  <Save size={14} color="#FFFFFF" strokeWidth={2.5} />
+                  <Text style={styles.saveBtnText}>Uložit</Text>
+                  {hasPending && (
+                    <View style={styles.pendingBadgeCircle}>
+                      <Text style={styles.pendingBadgeCircleText}>{pendingCount}</Text>
+                    </View>
+                  )}
+                </>
+              )}
+            </TouchableOpacity>
+          </Animated.View>
         </View>
       </View>
 
@@ -295,6 +333,33 @@ const styles = StyleSheet.create({
   saveBtnText: {
     color: '#FFFFFF',
     fontSize: 12.5,
+    fontWeight: '800',
+  },
+  saveBtnPending: {
+    backgroundColor: '#059669',
+    shadowColor: '#10B981',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.75,
+    shadowRadius: 8,
+    elevation: 8,
+    borderWidth: 1.5,
+    borderColor: '#6EE7B7',
+  },
+  pendingBadgeCircle: {
+    backgroundColor: '#DC2626',
+    borderRadius: 8,
+    minWidth: 16,
+    height: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 3,
+    marginLeft: 3,
+    borderWidth: 1,
+    borderColor: '#FFFFFF',
+  },
+  pendingBadgeCircleText: {
+    color: '#FFFFFF',
+    fontSize: 9.5,
     fontWeight: '800',
   },
   memberPillsScroll: {
