@@ -245,3 +245,44 @@ export function generateWeeks(
   }
   return weeks;
 }
+
+/**
+ * Returns an array of exactly 7 CalendarDay objects for the week containing the given date.
+ */
+export function getWeekDays(
+  targetDate: Date | string,
+  firstDayOfWeek: 'monday' | 'sunday' = 'monday',
+  showHolidays: boolean = true
+): CalendarDay[] {
+  const safeDate =
+    targetDate instanceof Date && !isNaN(targetDate.getTime())
+      ? targetDate
+      : new Date(targetDate || Date.now());
+  const validDate = isNaN(safeDate.getTime()) ? new Date() : safeDate;
+
+  const today = new Date();
+  const todayStr = formatLocalDate(today.getFullYear(), today.getMonth(), today.getDate());
+
+  const dayIndex =
+    firstDayOfWeek === 'sunday' ? validDate.getDay() : (validDate.getDay() + 6) % 7;
+  const startOfWeek = new Date(validDate);
+  startOfWeek.setDate(validDate.getDate() - dayIndex);
+
+  const days: CalendarDay[] = [];
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(startOfWeek);
+    d.setDate(startOfWeek.getDate() + i);
+    const dateStr = formatLocalDate(d.getFullYear(), d.getMonth(), d.getDate());
+    const dayOfWeek = d.getDay();
+    days.push({
+      dateStr,
+      dayNumber: d.getDate(),
+      isCurrentMonth: true,
+      isToday: dateStr === todayStr,
+      isWeekend: dayOfWeek === 0 || dayOfWeek === 6,
+      dayOfWeek,
+      holidayName: showHolidays ? getCzechHoliday(dateStr) : null,
+    });
+  }
+  return days;
+}

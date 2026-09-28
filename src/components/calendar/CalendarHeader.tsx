@@ -310,8 +310,8 @@ export default function CalendarHeader({ onSave, onAutoSaveMonth }: CalendarHead
         </View>
       </View>
 
-      {/* Month Navigator Pill Card (Shown only in Month / Week view, DayView has its own day nav) */}
-      {calendarView !== 'day' && (
+      {/* Month Navigator Pill Card (Shown only in Month view; Day and Week views have their own navigation) */}
+      {calendarView === 'month' && (
         <View style={[styles.navCard, { backgroundColor: ui.card, borderColor: ui.border }]}>
           <TouchableOpacity
             style={[styles.navArrow, { backgroundColor: ui.badgeBg }]}

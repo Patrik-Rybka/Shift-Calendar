@@ -42,6 +42,7 @@ import ShiftPickerModal from '@/components/calendar/ShiftPickerModal';
 import SuccessConfettiModal from '@/components/common/SuccessConfettiModal';
 import AddMemberModal from '@/components/calendar/AddMemberModal';
 import DayView from '@/components/calendar/DayView';
+import WeekAgendaView from '@/components/calendar/WeekAgendaView';
 import { getCurrentAppVersion } from '@/services/updateService';
 
 function formatCzechDateFull(dateStr: string): string {
@@ -1031,11 +1032,15 @@ export default function CalendarScreen() {
       {/* 1. Calendar Header (Month navigation, Sync badge, Group Code, Edit toggle) */}
       <CalendarHeader onSave={handleSaveShifts} onAutoSaveMonth={handleAutoSaveOnMonthSwitch} />
 
-      {/* 2. Main Calendar Content: DayView vs Month View Grid */}
+      {/* 2. Main Calendar Content: DayView vs WeekAgendaView vs Month View Grid */}
       {calendarView === 'day' ? (
         <DayView
           onEditDay={handleEditThisDay}
           onMakeShiftForWholeFamily={handleMakeShiftForWholeFamily}
+        />
+      ) : calendarView === 'week' ? (
+        <WeekAgendaView
+          onEditDay={handleEditThisDay}
         />
       ) : (
         <ScrollView
