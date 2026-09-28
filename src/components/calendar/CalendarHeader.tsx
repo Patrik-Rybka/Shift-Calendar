@@ -436,8 +436,9 @@ export default function CalendarHeader({ onSave, onAutoSaveMonth }: CalendarHead
 const styles = StyleSheet.create({
   container: {
     paddingHorizontal: 12,
-    paddingTop: 8,
-    gap: 10,
+    paddingTop: 10,
+    paddingBottom: 4,
+    gap: 12,
   },
   topRow: {
     flexDirection: 'row',
@@ -594,6 +595,8 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     borderWidth: 1,
     gap: 4,
+    marginTop: 4,
+    marginBottom: 4,
   },
   viewSelectorBtn: {
     flex: 1,

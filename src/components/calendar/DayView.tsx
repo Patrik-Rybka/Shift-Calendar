@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -6,6 +6,7 @@ import {
   TouchableOpacity,
   ScrollView,
   PanResponder,
+  Modal,
 } from 'react-native';
 import {
   ChevronLeft,
@@ -16,6 +17,7 @@ import {
   Calendar as CalendarIcon,
   Sparkles,
   Edit3,
+  X,
 } from 'lucide-react-native';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useSettingsStore } from '@/store/useSettingsStore';
@@ -77,6 +79,12 @@ export default function DayView({
 
   const fontMultiplier =
     fontSizeScale === 'small' ? 0.88 : fontSizeScale === 'large' ? 1.18 : 1.0;
+
+  const [selectedShiftDetail, setSelectedShiftDetail] = useState<{
+    member: (typeof groupMembers)[0];
+    shift: ReturnType<typeof getUserShiftsForDay>[0];
+    preset: (typeof presets)[0] | null;
+  } | null>(null);
 
   // Parse active date
   const activeDateObj = useMemo(() => {
@@ -341,10 +349,10 @@ export default function DayView({
               .map((s) => ({
                 shift: s,
                 preset: s.shift_preset_id
-                  ? presets.find((p) => p && p.id === s.shift_preset_id)
+                  ? presets.find((p) => p && p.id === s.shift_preset_id) || null
                   : null,
               }))
-              .filter((item) => item.preset !== null);
+              .filter((item) => item.preset !== null || (item.shift.note && item.shift.note.trim().length > 0));
 
             return (
               <View
@@ -415,66 +423,51 @@ export default function DayView({
                 {presetsWithShifts.length > 0 ? (
                   <View style={styles.shiftsContainer}>
                     {presetsWithShifts.map(({ shift, preset }, sIdx) => {
-                      if (!preset) return null;
+                      const cardColor = preset?.color || (isDark ? '#93C5FD' : '#2563EB');
+                      const cardTitle = preset?.title || 'Poznámka';
+                      const numHours = Number(preset?.hours);
+                      const hasHours = !isNaN(numHours) && numHours > 0;
+
                       return (
-                        <View
-                          key={`m_shift_${preset.id}_${sIdx}`}
+                        <TouchableOpacity
+                          key={`m_shift_${shift.id || preset?.id || sIdx}_${sIdx}`}
                           style={[
                             styles.shiftItemCard,
                             {
-                              backgroundColor: isDark ? `${preset.color}18` : `${preset.color}10`,
-                              borderLeftColor: preset.color,
+                              backgroundColor: isDark ? `${cardColor}18` : `${cardColor}10`,
+                              borderLeftColor: cardColor,
                             },
                           ]}
+                          onPress={() => setSelectedShiftDetail({ member, shift, preset })}
+                          activeOpacity={0.75}
                         >
                           <View style={styles.shiftMainRow}>
-                            <View style={{ flex: 1, gap: 2 }}>
-                              <Text
-                                style={[
-                                  styles.shiftTitleText,
-                                  { color: preset.color, fontSize: Math.round(15 * fontMultiplier) },
-                                ]}
-                              >
-                                {preset.title}
-                              </Text>
+                            <View style={{ flex: 1, gap: 3 }}>
+                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                                {!preset && (
+                                  <FileText size={13} color={cardColor} />
+                                )}
+                                <Text
+                                  style={[
+                                    styles.shiftTitleText,
+                                    { color: cardColor, fontSize: Math.round(15 * fontMultiplier) },
+                                  ]}
+                                >
+                                  {cardTitle}
+                                </Text>
+                              </View>
 
-                              {preset.start_time && preset.end_time ? (
+                              {preset?.start_time && preset?.end_time ? (
                                 <Text style={[styles.shiftTimeText, { color: ui.textMuted }]}>
                                   🕒 {preset.start_time} – {preset.end_time}
-                                  {preset.hours ? ` (${preset.hours}h)` : ''}
+                                  {hasHours ? ` (${numHours}h)` : ''}
                                 </Text>
-                              ) : preset.hours !== undefined && preset.hours !== null && preset.hours > 0 ? (
+                              ) : hasHours ? (
                                 <Text style={[styles.shiftTimeText, { color: ui.textMuted }]}>
-                                  🕒 {preset.hours} hodin
+                                  🕒 {numHours} {numHours === 1 ? 'hodina' : numHours >= 2 && numHours <= 4 ? 'hodiny' : 'hodin'}
                                 </Text>
                               ) : null}
                             </View>
-
-                            {/* Button: Make this shift for whole family */}
-                            {onMakeShiftForWholeFamily && (
-                              <TouchableOpacity
-                                style={[
-                                  styles.quickFamilyActionBtn,
-                                  {
-                                    backgroundColor: isDark ? '#1E293B' : '#F1F5F9',
-                                    borderColor: ui.cardBorder,
-                                  },
-                                ]}
-                                onPress={() =>
-                                  onMakeShiftForWholeFamily(
-                                    preset.id,
-                                    selectedDate,
-                                    shift?.note
-                                  )
-                                }
-                                activeOpacity={0.7}
-                              >
-                                <Users size={12} color="#8B5CF6" />
-                                <Text style={styles.quickFamilyActionText}>
-                                  Celé rodině
-                                </Text>
-                              </TouchableOpacity>
-                            )}
                           </View>
 
                           {/* Shift Note */}
@@ -488,13 +481,13 @@ export default function DayView({
                                 },
                               ]}
                             >
-                              <FileText size={12} color={preset.color} />
-                              <Text style={[styles.noteText, { color: ui.text }]}>
+                              <FileText size={12} color={cardColor} />
+                              <Text style={[styles.noteText, { color: ui.text }]} numberOfLines={2}>
                                 {shift.note}
                               </Text>
                             </View>
                           )}
-                        </View>
+                        </TouchableOpacity>
                       );
                     })}
                   </View>
@@ -527,6 +520,141 @@ export default function DayView({
           </View>
         )}
       </ScrollView>
+
+      {/* ─── Shift & Note Detail Modal (Tapped in Day View) ────────── */}
+      {selectedShiftDetail && (
+        <Modal
+          visible={!!selectedShiftDetail}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setSelectedShiftDetail(null)}
+        >
+          <View style={[styles.modalOverlay, { backgroundColor: 'rgba(0, 0, 0, 0.65)' }]}>
+            <View style={[styles.modalCard, { backgroundColor: ui.card, borderColor: ui.cardBorder }]}>
+              {/* Modal Header */}
+              <View style={styles.modalHeader}>
+                <View style={styles.modalHeaderTitleBox}>
+                  <CalendarIcon size={18} color={ui.accent} />
+                  <Text style={[styles.modalDateText, { color: ui.text }]}>
+                    {dayNumber}. {monthNameGenitive} {year}
+                  </Text>
+                </View>
+                <TouchableOpacity
+                  style={[styles.modalCloseBtn, { backgroundColor: isDark ? '#1E293B' : '#F1F5F9' }]}
+                  onPress={() => setSelectedShiftDetail(null)}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  <X size={18} color={ui.text} />
+                </TouchableOpacity>
+              </View>
+
+              {/* Member Row */}
+              <View style={styles.modalMemberRow}>
+                <View style={[styles.modalAvatarDot, { backgroundColor: selectedShiftDetail.member.color || '#2563EB' }]}>
+                  <Text style={styles.modalAvatarText}>
+                    {selectedShiftDetail.member.display_name.charAt(0).toUpperCase()}
+                  </Text>
+                </View>
+                <Text style={[styles.modalMemberName, { color: ui.text }]}>
+                  {selectedShiftDetail.member.display_name} {selectedShiftDetail.member.id === currentUser?.id ? '(Já)' : ''}
+                </Text>
+              </View>
+
+              {/* Shift info block */}
+              <View
+                style={[
+                  styles.modalShiftBlock,
+                  {
+                    backgroundColor: isDark
+                      ? `${selectedShiftDetail.preset?.color || ui.accent}18`
+                      : `${selectedShiftDetail.preset?.color || ui.accent}10`,
+                    borderColor: selectedShiftDetail.preset?.color || ui.accent,
+                  },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.modalShiftTitle,
+                    { color: selectedShiftDetail.preset?.color || ui.accent },
+                  ]}
+                >
+                  {selectedShiftDetail.preset?.title || 'Poznámka'}
+                </Text>
+
+                {selectedShiftDetail.preset?.start_time && selectedShiftDetail.preset?.end_time ? (
+                  <View style={styles.modalShiftTimeRow}>
+                    <Clock size={13} color={ui.textMuted} />
+                    <Text style={[styles.modalShiftTimeText, { color: ui.textMuted }]}>
+                      {selectedShiftDetail.preset.start_time} – {selectedShiftDetail.preset.end_time}
+                      {Number(selectedShiftDetail.preset.hours) > 0 ? ` (${Number(selectedShiftDetail.preset.hours)}h)` : ''}
+                    </Text>
+                  </View>
+                ) : Number(selectedShiftDetail.preset?.hours) > 0 ? (
+                  <View style={styles.modalShiftTimeRow}>
+                    <Clock size={13} color={ui.textMuted} />
+                    <Text style={[styles.modalShiftTimeText, { color: ui.textMuted }]}>
+                      {Number(selectedShiftDetail.preset?.hours)} {Number(selectedShiftDetail.preset?.hours) === 1 ? 'hodina' : Number(selectedShiftDetail.preset?.hours) >= 2 && Number(selectedShiftDetail.preset?.hours) <= 4 ? 'hodiny' : 'hodin'}
+                    </Text>
+                  </View>
+                ) : null}
+              </View>
+
+              {/* Note Content Section */}
+              {selectedShiftDetail.shift.note && selectedShiftDetail.shift.note.trim().length > 0 ? (
+                <View
+                  style={[
+                    styles.modalNoteSection,
+                    {
+                      backgroundColor: isDark ? '#161F33' : '#F1F5F9',
+                      borderColor: ui.cardBorder,
+                    },
+                  ]}
+                >
+                  <View style={styles.modalNoteHeader}>
+                    <FileText size={14} color={ui.accent} />
+                    <Text style={[styles.modalNoteLabel, { color: ui.accent }]}>Poznámka:</Text>
+                  </View>
+                  <ScrollView style={{ maxHeight: 180 }} showsVerticalScrollIndicator={true}>
+                    <Text style={[styles.modalNoteText, { color: ui.text }]} selectable>
+                      {selectedShiftDetail.shift.note}
+                    </Text>
+                  </ScrollView>
+                </View>
+              ) : null}
+
+              {/* Action Buttons */}
+              <View style={styles.modalActionsRow}>
+                {onEditDay && (
+                  <TouchableOpacity
+                    style={[styles.modalEditBtn, { backgroundColor: ui.accent }]}
+                    onPress={() => {
+                      setSelectedShiftDetail(null);
+                      onEditDay(currentCalendarDay);
+                    }}
+                    activeOpacity={0.8}
+                  >
+                    <Edit3 size={15} color="#FFFFFF" />
+                    <Text style={styles.modalEditBtnText}>Upravit směnu</Text>
+                  </TouchableOpacity>
+                )}
+                <TouchableOpacity
+                  style={[
+                    styles.modalCloseButton,
+                    {
+                      borderColor: ui.cardBorder,
+                      backgroundColor: isDark ? '#1E293B' : '#F8FAFC',
+                    },
+                  ]}
+                  onPress={() => setSelectedShiftDetail(null)}
+                  activeOpacity={0.8}
+                >
+                  <Text style={[styles.modalCloseButtonText, { color: ui.text }]}>Zavřít</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+      )}
     </View>
   );
 }
@@ -776,6 +904,139 @@ const styles = StyleSheet.create({
   editDayBtnText: {
     color: '#FFFFFF',
     fontSize: 15,
+    fontWeight: '700',
+  },
+  modalOverlay: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  modalCard: {
+    width: '100%',
+    maxWidth: 380,
+    borderRadius: 20,
+    borderWidth: 1,
+    padding: 20,
+    gap: 14,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.25,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  modalHeaderTitleBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flex: 1,
+  },
+  modalDateText: {
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  modalCloseBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalMemberRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  modalAvatarDot: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalAvatarText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  modalMemberName: {
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  modalShiftBlock: {
+    padding: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    gap: 4,
+  },
+  modalShiftTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  modalShiftTimeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  modalShiftTimeText: {
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  modalNoteSection: {
+    padding: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    gap: 6,
+  },
+  modalNoteHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  modalNoteLabel: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  modalNoteText: {
+    fontSize: 14,
+    lineHeight: 20,
+    fontWeight: '500',
+  },
+  modalActionsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginTop: 4,
+  },
+  modalEditBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 12,
+    borderRadius: 12,
+  },
+  modalEditBtnText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  modalCloseButton: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalCloseButtonText: {
+    fontSize: 14,
     fontWeight: '700',
   },
 });

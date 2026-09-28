@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -6,6 +6,7 @@ import {
   TouchableOpacity,
   ScrollView,
   PanResponder,
+  Modal,
 } from 'react-native';
 import {
   ChevronLeft,
@@ -15,6 +16,7 @@ import {
   Clock,
   FileText,
   Edit3,
+  X,
 } from 'lucide-react-native';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useSettingsStore } from '@/store/useSettingsStore';
@@ -47,6 +49,21 @@ const CZECH_DAY_NAMES_SHORT = [
   'So',
 ];
 
+const CZECH_MONTHS_GENITIVE = [
+  'ledna',
+  'února',
+  'března',
+  'dubna',
+  'května',
+  'června',
+  'července',
+  'srpna',
+  'září',
+  'října',
+  'listopadu',
+  'prosince',
+];
+
 interface WeekAgendaViewProps {
   onEditDay?: (day: CalendarDay) => void;
   onDayPress?: (day: CalendarDay) => void;
@@ -74,6 +91,13 @@ export default function WeekAgendaView({
 
   const fontMultiplier =
     fontSizeScale === 'small' ? 0.88 : fontSizeScale === 'large' ? 1.18 : 1.0;
+
+  const [detailItem, setDetailItem] = useState<{
+    member: (typeof groupMembers)[0];
+    shift: ReturnType<typeof getUserShiftsForDay>[0];
+    preset: (typeof presets)[0] | null;
+    day: CalendarDay;
+  } | null>(null);
 
   // Active date object
   const activeDateObj = useMemo(() => {
@@ -382,10 +406,10 @@ export default function WeekAgendaView({
                     .map((s) => ({
                       shift: s,
                       preset: s.shift_preset_id
-                        ? safePresets.find((p) => p && p.id === s.shift_preset_id)
+                        ? safePresets.find((p) => p && p.id === s.shift_preset_id) || null
                         : null,
                     }))
-                    .filter((item) => item.preset !== null);
+                    .filter((item) => item.preset !== null || (item.shift.note && item.shift.note.trim().length > 0));
 
                   return (
                     <View
@@ -422,41 +446,81 @@ export default function WeekAgendaView({
                       <View style={styles.memberRightShifts}>
                         {presetsWithShifts.length > 0 ? (
                           presetsWithShifts.map(({ shift, preset }, sIdx) => {
-                            if (!preset) return null;
+                            const chipColor = preset?.color || (isDark ? '#93C5FD' : '#2563EB');
+                            const chipTitle = preset?.title || 'Poznámka';
+                            const numHours = Number(preset?.hours);
+                            const hasHours = !isNaN(numHours) && numHours > 0;
+
                             return (
-                              <View
-                                key={`w_shift_${preset.id}_${sIdx}`}
-                                style={[
-                                  styles.shiftChip,
-                                  {
-                                    backgroundColor: isDark ? `${preset.color}25` : `${preset.color}16`,
-                                    borderColor: preset.color,
-                                  },
-                                ]}
+                              <TouchableOpacity
+                                key={`w_shift_${shift.id || preset?.id || sIdx}_${sIdx}`}
+                                style={styles.shiftChipGroup}
+                                onPress={() => setDetailItem({ member, shift, preset, day })}
+                                activeOpacity={0.7}
                               >
-                                <Text
+                                <View
                                   style={[
-                                    styles.shiftChipTitle,
-                                    { color: preset.color, fontSize: Math.round(12.5 * fontMultiplier) },
+                                    styles.shiftChip,
+                                    {
+                                      backgroundColor: isDark ? `${chipColor}25` : `${chipColor}16`,
+                                      borderColor: chipColor,
+                                    },
                                   ]}
                                 >
-                                  {preset.title}
-                                </Text>
-
-                                {preset.start_time && preset.end_time ? (
-                                  <Text style={[styles.shiftChipTimes, { color: ui.textMuted }]}>
-                                    {preset.start_time}–{preset.end_time}
+                                  {!preset && (
+                                    <FileText size={11} color={chipColor} style={{ marginRight: 2 }} />
+                                  )}
+                                  <Text
+                                    style={[
+                                      styles.shiftChipTitle,
+                                      { color: chipColor, fontSize: Math.round(12.5 * fontMultiplier) },
+                                    ]}
+                                  >
+                                    {chipTitle}
                                   </Text>
-                                ) : preset.hours ? (
-                                  <Text style={[styles.shiftChipTimes, { color: ui.textMuted }]}>
-                                    {preset.hours}h
-                                  </Text>
-                                ) : null}
 
-                                {shift.note ? (
-                                  <FileText size={10} color={preset.color} style={{ marginLeft: 2 }} />
+                                  {preset?.start_time && preset?.end_time ? (
+                                    <Text style={[styles.shiftChipTimes, { color: ui.textMuted }]}>
+                                      {preset.start_time}–{preset.end_time}
+                                    </Text>
+                                  ) : hasHours ? (
+                                    <Text style={[styles.shiftChipTimes, { color: ui.textMuted }]}>
+                                      {numHours}h
+                                    </Text>
+                                  ) : null}
+
+                                  {preset && shift.note ? (
+                                    <FileText size={10} color={chipColor} style={{ marginLeft: 2 }} />
+                                  ) : null}
+                                </View>
+
+                                {/* Visible Note Preview Bubble */}
+                                {shift.note && shift.note.trim().length > 0 ? (
+                                  <View
+                                    style={[
+                                      styles.weekNotePreview,
+                                      {
+                                        backgroundColor: isDark ? 'rgba(59, 130, 246, 0.12)' : '#EFF6FF',
+                                        borderColor: isDark ? 'rgba(59, 130, 246, 0.25)' : '#BFDBFE',
+                                      },
+                                    ]}
+                                  >
+                                    <FileText size={9.5} color={isDark ? '#93C5FD' : '#2563EB'} style={{ marginRight: 3 }} />
+                                    <Text
+                                      style={[
+                                        styles.weekNotePreviewText,
+                                        {
+                                          color: isDark ? '#E2E8F0' : '#1E293B',
+                                          fontSize: Math.round(10.5 * fontMultiplier),
+                                        },
+                                      ]}
+                                      numberOfLines={1}
+                                    >
+                                      {shift.note}
+                                    </Text>
+                                  </View>
                                 ) : null}
-                              </View>
+                              </TouchableOpacity>
                             );
                           })
                         ) : (
@@ -473,6 +537,142 @@ export default function WeekAgendaView({
           );
         })}
       </ScrollView>
+
+      {/* ─── Shift & Note Detail Modal (Tapped in Week Agenda) ────────── */}
+      {detailItem && (
+        <Modal
+          visible={!!detailItem}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setDetailItem(null)}
+        >
+          <View style={[styles.modalOverlay, { backgroundColor: 'rgba(0, 0, 0, 0.65)' }]}>
+            <View style={[styles.modalCard, { backgroundColor: ui.card, borderColor: ui.cardBorder }]}>
+              {/* Modal Header */}
+              <View style={styles.modalHeader}>
+                <View style={styles.modalHeaderTitleBox}>
+                  <CalendarIcon size={18} color={ui.accent} />
+                  <Text style={[styles.modalDateText, { color: ui.text }]}>
+                    {detailItem.day.dayNumber}. {CZECH_MONTHS_GENITIVE[new Date(detailItem.day.dateStr).getMonth()] || ''} {new Date(detailItem.day.dateStr).getFullYear()}
+                  </Text>
+                </View>
+                <TouchableOpacity
+                  style={[styles.modalCloseBtn, { backgroundColor: isDark ? '#1E293B' : '#F1F5F9' }]}
+                  onPress={() => setDetailItem(null)}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  <X size={18} color={ui.text} />
+                </TouchableOpacity>
+              </View>
+
+              {/* Member Row */}
+              <View style={styles.modalMemberRow}>
+                <View style={[styles.modalAvatarDot, { backgroundColor: detailItem.member.color || '#2563EB' }]}>
+                  <Text style={styles.modalAvatarText}>
+                    {detailItem.member.display_name.charAt(0).toUpperCase()}
+                  </Text>
+                </View>
+                <Text style={[styles.modalMemberName, { color: ui.text }]}>
+                  {detailItem.member.display_name} {detailItem.member.id === currentUser?.id ? '(Já)' : ''}
+                </Text>
+              </View>
+
+              {/* Shift info block */}
+              <View
+                style={[
+                  styles.modalShiftBlock,
+                  {
+                    backgroundColor: isDark
+                      ? `${detailItem.preset?.color || ui.accent}18`
+                      : `${detailItem.preset?.color || ui.accent}10`,
+                    borderColor: detailItem.preset?.color || ui.accent,
+                  },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.modalShiftTitle,
+                    { color: detailItem.preset?.color || ui.accent },
+                  ]}
+                >
+                  {detailItem.preset?.title || 'Poznámka'}
+                </Text>
+
+                {detailItem.preset?.start_time && detailItem.preset?.end_time ? (
+                  <View style={styles.modalShiftTimeRow}>
+                    <Clock size={13} color={ui.textMuted} />
+                    <Text style={[styles.modalShiftTimeText, { color: ui.textMuted }]}>
+                      {detailItem.preset.start_time} – {detailItem.preset.end_time}
+                      {Number(detailItem.preset.hours) > 0 ? ` (${Number(detailItem.preset.hours)}h)` : ''}
+                    </Text>
+                  </View>
+                ) : Number(detailItem.preset?.hours) > 0 ? (
+                  <View style={styles.modalShiftTimeRow}>
+                    <Clock size={13} color={ui.textMuted} />
+                    <Text style={[styles.modalShiftTimeText, { color: ui.textMuted }]}>
+                      {Number(detailItem.preset?.hours)} h
+                    </Text>
+                  </View>
+                ) : null}
+              </View>
+
+              {/* Note Content Section */}
+              {detailItem.shift.note && detailItem.shift.note.trim().length > 0 ? (
+                <View
+                  style={[
+                    styles.modalNoteSection,
+                    {
+                      backgroundColor: isDark ? '#161F33' : '#F1F5F9',
+                      borderColor: ui.cardBorder,
+                    },
+                  ]}
+                >
+                  <View style={styles.modalNoteHeader}>
+                    <FileText size={14} color={ui.accent} />
+                    <Text style={[styles.modalNoteLabel, { color: ui.accent }]}>Poznámka:</Text>
+                  </View>
+                  <ScrollView style={{ maxHeight: 180 }} showsVerticalScrollIndicator={true}>
+                    <Text style={[styles.modalNoteText, { color: ui.text }]} selectable>
+                      {detailItem.shift.note}
+                    </Text>
+                  </ScrollView>
+                </View>
+              ) : null}
+
+              {/* Action Buttons */}
+              <View style={styles.modalActionsRow}>
+                {onEditDay && (
+                  <TouchableOpacity
+                    style={[styles.modalEditBtn, { backgroundColor: ui.accent }]}
+                    onPress={() => {
+                      const d = detailItem.day;
+                      setDetailItem(null);
+                      onEditDay(d);
+                    }}
+                    activeOpacity={0.8}
+                  >
+                    <Edit3 size={15} color="#FFFFFF" />
+                    <Text style={styles.modalEditBtnText}>Upravit den</Text>
+                  </TouchableOpacity>
+                )}
+                <TouchableOpacity
+                  style={[
+                    styles.modalCloseButton,
+                    {
+                      borderColor: ui.cardBorder,
+                      backgroundColor: isDark ? '#1E293B' : '#F8FAFC',
+                    },
+                  ]}
+                  onPress={() => setDetailItem(null)}
+                  activeOpacity={0.8}
+                >
+                  <Text style={[styles.modalCloseButtonText, { color: ui.text }]}>Zavřít</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+      )}
     </View>
   );
 }
@@ -673,5 +873,156 @@ const styles = StyleSheet.create({
   memberOffText: {
     fontSize: 12.5,
     fontStyle: 'italic',
+  },
+  shiftChipGroup: {
+    alignItems: 'flex-end',
+    gap: 3,
+    marginBottom: 2,
+  },
+  weekNotePreview: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 7,
+    paddingVertical: 2.5,
+    borderRadius: 6,
+    borderWidth: 1,
+    maxWidth: 160,
+  },
+  weekNotePreviewText: {
+    fontWeight: '500',
+    flexShrink: 1,
+  },
+  modalOverlay: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  modalCard: {
+    width: '100%',
+    maxWidth: 380,
+    borderRadius: 20,
+    borderWidth: 1,
+    padding: 20,
+    gap: 14,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.25,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  modalHeaderTitleBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flex: 1,
+  },
+  modalDateText: {
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  modalCloseBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalMemberRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  modalAvatarDot: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalAvatarText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  modalMemberName: {
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  modalShiftBlock: {
+    padding: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    gap: 4,
+  },
+  modalShiftTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  modalShiftTimeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  modalShiftTimeText: {
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  modalNoteSection: {
+    padding: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    gap: 6,
+  },
+  modalNoteHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  modalNoteLabel: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  modalNoteText: {
+    fontSize: 14,
+    lineHeight: 20,
+    fontWeight: '500',
+  },
+  modalActionsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginTop: 4,
+  },
+  modalEditBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 12,
+    borderRadius: 12,
+  },
+  modalEditBtnText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  modalCloseButton: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalCloseButtonText: {
+    fontSize: 14,
+    fontWeight: '700',
   },
 });

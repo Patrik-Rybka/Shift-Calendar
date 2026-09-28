@@ -757,9 +757,9 @@ export default function SettingsScreen() {
                           <Text style={[styles.scopeBadgeText, { color: ui.successText }]}>Celá rodina</Text>
                         </View>
                       )}
-                      {hasTimes && preset.hours > 0 && (
+                      {hasTimes && Number(preset.hours) > 0 && (
                         <View style={[styles.hoursBadge, { backgroundColor: `${bg}18`, borderColor: `${bg}40` }]}>
-                          <Text style={[styles.hoursBadgeText, { color: bg }]}>{preset.hours}h</Text>
+                          <Text style={[styles.hoursBadgeText, { color: bg }]}>{Number(preset.hours)}h</Text>
                         </View>
                       )}
                     </View>
@@ -1194,9 +1194,9 @@ export default function SettingsScreen() {
                             <View style={{ flex: 1, gap: 1 }}>
                               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                                 <Text style={[styles.presetVisibilityRowTitle, { color: ui.text }]}>{preset.title}</Text>
-                                {hasTimes && preset.hours > 0 && (
+                                {hasTimes && Number(preset.hours) > 0 && (
                                   <View style={[styles.hoursBadgeSmall, { backgroundColor: `${preset.color}18`, borderColor: `${preset.color}35` }]}>
-                                    <Text style={[styles.hoursBadgeSmallText, { color: preset.color }]}>{preset.hours}h</Text>
+                                    <Text style={[styles.hoursBadgeSmallText, { color: preset.color }]}>{Number(preset.hours)}h</Text>
                                   </View>
                                 )}
                               </View>

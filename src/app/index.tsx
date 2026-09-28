@@ -1065,28 +1065,41 @@ export default function CalendarScreen() {
   );
 
   const handleMakeShiftForWholeFamily = useCallback(
-    async (presetId: string, dateStr: string, note?: string | null) => {
+    (presetId: string, dateStr: string, note?: string | null) => {
       if (!currentGroup?.id || !groupMembers?.length) return;
-
-      for (const m of groupMembers) {
-        applyShift({
-          groupId: currentGroup.id,
-          userId: m.id,
-          date: dateStr,
-          presetId,
-          note: note !== undefined ? note : null,
-        });
-      }
-
       const preset = presets.find((p) => p.id === presetId);
       const title = preset?.title || 'Směna';
-      showToast(`✓ ${title} nastavena pro celou rodinu`);
 
-      try {
-        await syncWithNeon(currentGroup.id);
-      } catch (err) {
-        console.warn('Sync failed after handleMakeShiftForWholeFamily:', err);
-      }
+      Alert.alert(
+        'Nastavit pro celou rodinu?',
+        `Opravdu si přejete nastavit "${title}" pro všechny členy rodiny na tento den?`,
+        [
+          { text: 'Zrušit', style: 'cancel' },
+          {
+            text: 'Ano, nastavit',
+            style: 'default',
+            onPress: async () => {
+              for (const m of groupMembers) {
+                applyShift({
+                  groupId: currentGroup.id,
+                  userId: m.id,
+                  date: dateStr,
+                  presetId,
+                  note: note !== undefined ? note : null,
+                });
+              }
+
+              showToast(`✓ ${title} nastavena pro celou rodinu`);
+
+              try {
+                await syncWithNeon(currentGroup.id);
+              } catch (err) {
+                console.warn('Sync failed after handleMakeShiftForWholeFamily:', err);
+              }
+            },
+          },
+        ]
+      );
     },
     [currentGroup?.id, groupMembers, applyShift, presets, showToast, syncWithNeon]
   );
@@ -1418,7 +1431,7 @@ export default function CalendarScreen() {
                       shift: s,
                       preset: s.shift_preset_id ? presets.find((p) => p && p.id === s.shift_preset_id) : null,
                     }))
-                    .filter((item) => item.preset !== null);
+                    .filter((item) => item.preset !== null || (item.shift.note && item.shift.note.trim().length > 0));
 
                   return (
                     <View key={member.id} style={{ gap: 4, opacity: isHidden ? 0.6 : 1 }}>
@@ -1448,55 +1461,61 @@ export default function CalendarScreen() {
                         {presetsWithShifts.length > 0 ? (
                           <View style={{ alignItems: 'flex-end', gap: 6 }}>
                             {presetsWithShifts.map(({ shift, preset }, sIdx) => {
-                              if (!preset) return null;
+                              const cardColor = preset?.color || (isDark ? '#93C5FD' : '#2563EB');
+                              const cardTitle = preset?.title || 'Poznámka';
+                              const numHours = Number(preset?.hours);
+                              const hasHours = !isNaN(numHours) && numHours > 0;
+
                               return (
-                                <View key={`m_shift_${preset.id}_${sIdx}`} style={{ alignItems: 'flex-end', gap: 4 }}>
+                                <View key={`m_shift_${shift.id || preset?.id || sIdx}_${sIdx}`} style={{ alignItems: 'flex-end', gap: 4 }}>
                                   <View
                                     style={[
                                       styles.modalShiftBadge,
                                       {
-                                        backgroundColor: `${preset.color}20`,
-                                        borderColor: preset.color,
+                                        backgroundColor: `${cardColor}20`,
+                                        borderColor: cardColor,
                                       },
                                     ]}
                                   >
-                                    <Text style={[styles.modalShiftTitle, { color: preset.color }]}>
-                                      {preset.title}
+                                    <Text style={[styles.modalShiftTitle, { color: cardColor }]}>
+                                      {cardTitle}
                                     </Text>
-                                    {preset.start_time && preset.end_time ? (
+                                    {preset?.start_time && preset?.end_time ? (
                                       <Text style={[styles.modalShiftTimes, { color: ui.textMuted }]}>
-                                        {preset.start_time} – {preset.end_time} ({preset.hours}h)
+                                        {preset.start_time} – {preset.end_time}{hasHours ? ` (${numHours}h)` : ''}
                                       </Text>
-                                    ) : preset.hours !== undefined && preset.hours !== null && preset.hours > 0 ? (
+                                    ) : hasHours ? (
                                       <Text style={[styles.modalShiftTimes, { color: ui.textMuted }]}>
-                                        {preset.hours}h
+                                        {numHours}h
                                       </Text>
                                     ) : null}
                                   </View>
 
                                   {/* Quick Action: Make this shift for the whole family */}
-                                  <TouchableOpacity
-                                    style={[
-                                      styles.modalQuickFamilyBtn,
-                                      {
-                                        borderColor: ui.border,
-                                        backgroundColor: isDark ? '#161F33' : '#F1F5F9',
-                                      },
-                                    ]}
-                                    onPress={() =>
-                                      handleMakeShiftForWholeFamily(
-                                        preset.id,
-                                        selectedDayDetail.dateStr,
-                                        shift?.note
-                                      )
-                                    }
-                                    activeOpacity={0.7}
-                                  >
-                                    <Users size={11} color="#8B5CF6" />
-                                    <Text style={[styles.modalQuickFamilyBtnText, { color: isDark ? '#C4B5FD' : '#7C3AED' }]}>
-                                      Zapsat celé rodině
-                                    </Text>
-                                  </TouchableOpacity>
+                                  {preset && (
+                                    <TouchableOpacity
+                                      style={[
+                                        styles.modalQuickFamilyBtn,
+                                        {
+                                          borderColor: ui.border,
+                                          backgroundColor: isDark ? '#161F33' : '#F1F5F9',
+                                        },
+                                      ]}
+                                      onPress={() =>
+                                        handleMakeShiftForWholeFamily(
+                                          preset.id,
+                                          selectedDayDetail.dateStr,
+                                          shift?.note
+                                        )
+                                      }
+                                      activeOpacity={0.7}
+                                    >
+                                      <Users size={11} color="#8B5CF6" />
+                                      <Text style={[styles.modalQuickFamilyBtnText, { color: isDark ? '#C4B5FD' : '#7C3AED' }]}>
+                                        Zapsat celé rodině
+                                      </Text>
+                                    </TouchableOpacity>
+                                  )}
                                 </View>
                               );
                             })}

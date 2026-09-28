@@ -445,13 +445,17 @@ export default function ShiftPickerModal({
                     ) : null}
                   </View>
 
-                  {preset.hours !== undefined && preset.hours !== null && preset.hours > 0 ? (
-                    <View style={[styles.hoursPill, { backgroundColor: `${bg}25`, borderColor: `${bg}60` }]}>
-                      <Text style={[styles.hoursPillText, { color: bg }]}>
-                        {preset.hours}h
-                      </Text>
-                    </View>
-                  ) : null}
+                  {(() => {
+                    const numHours = Number(preset.hours);
+                    if (isNaN(numHours) || numHours <= 0) return null;
+                    return (
+                      <View style={[styles.hoursPill, { backgroundColor: `${bg}25`, borderColor: `${bg}60` }]}>
+                        <Text style={[styles.hoursPillText, { color: bg }]}>
+                          {numHours}h
+                        </Text>
+                      </View>
+                    );
+                  })()}
                 </TouchableOpacity>
               );
             })}
