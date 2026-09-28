@@ -18,6 +18,8 @@ import {
   Users,
   Crown,
   UserPlus,
+  RotateCcw,
+  Eraser,
 } from 'lucide-react-native';
 import { useShiftStore } from '@/store/useShiftStore';
 import { useAuthStore } from '@/store/useAuthStore';
@@ -27,9 +29,10 @@ interface EditToolbarProps {
   onSave?: () => Promise<void>;
   onCancel?: () => Promise<void>;
   onOpenAddMember?: () => void;
+  onToast?: (msg: string) => void;
 }
 
-export default function EditToolbar({ onSave, onCancel, onOpenAddMember }: EditToolbarProps) {
+export default function EditToolbar({ onSave, onCancel, onOpenAddMember, onToast }: EditToolbarProps) {
   const isDark = useColorScheme() === 'dark';
   const insets = useSafeAreaInsets();
   const { currentUser, groupMembers } = useAuthStore();
@@ -38,6 +41,10 @@ export default function EditToolbar({ onSave, onCancel, onOpenAddMember }: EditT
   const {
     isEditMode,
     setEditMode,
+    isEraserMode,
+    toggleEraserMode,
+    undo,
+    undoStack,
     editingUserId,
     setEditingUserId,
     clearRangeSelection,
@@ -168,6 +175,63 @@ export default function EditToolbar({ onSave, onCancel, onOpenAddMember }: EditT
         </View>
 
         <View style={styles.actionButtons}>
+          {/* Undo Action Button */}
+          <TouchableOpacity
+            style={[
+              styles.toolbarIconButton,
+              {
+                backgroundColor: ui.cancelBg,
+                borderColor: ui.border,
+                opacity: undoStack.length > 0 ? 1 : 0.4,
+              },
+            ]}
+            disabled={undoStack.length === 0}
+            activeOpacity={0.7}
+            onPress={() => {
+              if (undoStack.length === 0) return;
+              const desc = undo();
+              onToast?.(`↩️ ${desc || 'Akce vrácena'}`);
+            }}
+            hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+            accessibilityLabel="Vrátit zpět"
+          >
+            <RotateCcw size={14} color={ui.text} />
+          </TouchableOpacity>
+
+          {/* Eraser / Smazat Tool Toggle */}
+          <TouchableOpacity
+            style={[
+              styles.toolbarIconButton,
+              isEraserMode
+                ? {
+                    backgroundColor: isDark ? 'rgba(239, 68, 68, 0.25)' : '#FEE2E2',
+                    borderColor: '#EF4444',
+                  }
+                : {
+                    backgroundColor: ui.cancelBg,
+                    borderColor: ui.border,
+                  },
+            ]}
+            activeOpacity={0.75}
+            onPress={() => {
+              const next = !isEraserMode;
+              toggleEraserMode();
+              if (next) {
+                onToast?.('🧹 Režim mazání aktivován. Klepněte na den pro smazání směny.');
+              } else {
+                onToast?.('Režim mazání vypnut.');
+              }
+            }}
+            hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+            accessibilityLabel="Režim mazání"
+          >
+            <Eraser
+              size={14}
+              color={isEraserMode ? '#EF4444' : ui.textMuted}
+              strokeWidth={isEraserMode ? 2.5 : 2}
+            />
+          </TouchableOpacity>
+
           <TouchableOpacity
             style={[styles.cancelBtn, { backgroundColor: ui.cancelBg, borderColor: ui.border }]}
             activeOpacity={0.75}
@@ -337,6 +401,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 6,
     flexShrink: 0,
+  },
+  toolbarIconButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 10,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   cancelBtn: {
     flexDirection: 'row',

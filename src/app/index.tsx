@@ -10,6 +10,7 @@ import {
   ActivityIndicator,
   Alert,
   AppState,
+  Platform,
 } from 'react-native';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -91,6 +92,10 @@ export default function CalendarScreen() {
     currentMonth,
     isEditMode,
     setEditMode,
+    isEraserMode,
+    setEraserMode,
+    undo,
+    undoStack,
     rangeStart,
     rangeEnd,
     setRangeStart,
@@ -107,12 +112,24 @@ export default function CalendarScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [selectedDayDetail, setSelectedDayDetail] = useState<CalendarDay | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const toastTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const showToast = useCallback((msg: string) => {
+  const showToast = useCallback((msg: string, duration = 4000) => {
+    if (toastTimeoutRef.current) {
+      clearTimeout(toastTimeoutRef.current);
+    }
     setToastMessage(msg);
-    setTimeout(() => {
-      setToastMessage((cur) => (cur === msg ? null : cur));
-    }, 2800);
+    toastTimeoutRef.current = setTimeout(() => {
+      setToastMessage(null);
+    }, duration);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (toastTimeoutRef.current) {
+        clearTimeout(toastTimeoutRef.current);
+      }
+    };
   }, []);
   const [pickerVisible, setPickerVisible] = useState(false);
   const [selectedRange, setSelectedRange] = useState<{ start: string; end: string } | null>(null);
@@ -958,11 +975,26 @@ export default function CalendarScreen() {
     (startDateStr: string, endDateStr: string) => {
       const minDate = startDateStr < endDateStr ? startDateStr : endDateStr;
       const maxDate = startDateStr < endDateStr ? endDateStr : startDateStr;
+      const isAllFamily = editingUserId === '__ALL__';
       const targetUserId =
-        editingUserId === '__ALL__'
+        isAllFamily
           ? (currentUser?.id || groupMembers[0]?.id)
           : (editingUserId || currentUser?.id);
-      const existingShifts = targetUserId ? getUserShiftsForDay(shifts, targetUserId, minDate) : [];
+
+      if (!targetUserId || !currentGroup?.id) return;
+
+      if (isEraserMode) {
+        const dates = getDatesBetween(minDate, maxDate);
+        for (const dStr of dates) {
+          removeShift(currentGroup.id, targetUserId, dStr);
+        }
+        clearRangeSelection();
+        const memberName = groupMembers.find((m) => m.id === targetUserId)?.display_name || 'Uživatel';
+        showToast(`🗑️ Smazáno (${dates.length} dnů) pro: ${memberName}`);
+        return;
+      }
+
+      const existingShifts = getUserShiftsForDay(shifts, targetUserId, minDate);
       const existingNote = existingShifts.find((s) => s.note)?.note || null;
 
       setCurrentInitialNote(existingNote);
@@ -971,18 +1003,34 @@ export default function CalendarScreen() {
       setSelectedRange({ start: minDate, end: maxDate });
       setPickerVisible(true);
     },
-    [setRangeStart, setRangeEnd, editingUserId, currentUser?.id, groupMembers, shifts]
+    [currentGroup?.id, isEraserMode, editingUserId, currentUser?.id, groupMembers, shifts, removeShift, clearRangeSelection, showToast, setRangeStart, setRangeEnd]
   );
 
   const handleDayTapInEditMode = useCallback(
     (day: CalendarDay) => {
-      if (!day.isCurrentMonth) return;
+      if (!day.isCurrentMonth || !currentGroup?.id) return;
 
+      const isAllFamily = editingUserId === '__ALL__';
       const targetUserId =
-        editingUserId === '__ALL__'
+        isAllFamily
           ? (currentUser?.id || groupMembers[0]?.id)
           : (editingUserId || currentUser?.id);
-      const existingShifts = targetUserId ? getUserShiftsForDay(shifts, targetUserId, day.dateStr) : [];
+
+      if (!targetUserId) return;
+
+      if (isEraserMode) {
+        const existingShifts = getUserShiftsForDay(shifts, targetUserId, day.dateStr);
+        const memberName = groupMembers.find((m) => m.id === targetUserId)?.display_name || 'Uživatel';
+        if (existingShifts.length > 0) {
+          removeShift(currentGroup.id, targetUserId, day.dateStr);
+          showToast(`🗑️ Směna smazána pro: ${memberName}`);
+        } else {
+          showToast(`Tento den nemá ${memberName} žádnou směnu`);
+        }
+        return;
+      }
+
+      const existingShifts = getUserShiftsForDay(shifts, targetUserId, day.dateStr);
       const existingNote = existingShifts.find((s) => s.note)?.note || null;
 
       setCurrentInitialNote(existingNote);
@@ -991,7 +1039,7 @@ export default function CalendarScreen() {
       setSelectedRange({ start: day.dateStr, end: day.dateStr });
       setPickerVisible(true);
     },
-    [setRangeStart, setRangeEnd, editingUserId, currentUser?.id, groupMembers, shifts]
+    [currentGroup?.id, isEraserMode, editingUserId, currentUser?.id, groupMembers, shifts, removeShift, showToast, setRangeStart, setRangeEnd]
   );
 
   const handleApplyPresetFromModal = useCallback(
@@ -1195,7 +1243,7 @@ export default function CalendarScreen() {
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: ui.bg }]}>
       {/* 1. Calendar Header (Month navigation, Sync badge, Group Code, Edit toggle) */}
-      <CalendarHeader onSave={handleSaveShifts} onAutoSaveMonth={handleAutoSaveOnMonthSwitch} />
+      <CalendarHeader onSave={handleSaveShifts} onAutoSaveMonth={handleAutoSaveOnMonthSwitch} onToast={showToast} />
 
       {/* 2. Main Calendar Content: DayView vs WeekAgendaView vs Month View Grid */}
       {calendarView === 'day' ? (
@@ -1332,7 +1380,13 @@ export default function CalendarScreen() {
 
       {/* 5. Floating Toast Notification for quick notices */}
       {toastMessage && (
-        <View style={styles.toastContainer} pointerEvents="none">
+        <View
+          style={[
+            styles.toastContainer,
+            { bottom: isEditMode ? 125 : (Platform.OS === 'android' ? 85 : 75) },
+          ]}
+          pointerEvents="none"
+        >
           <View style={[styles.toastPill, { backgroundColor: isDark ? '#1E293B' : '#0F172A' }]}>
             <Text style={styles.toastText}>{toastMessage}</Text>
           </View>
@@ -1581,6 +1635,7 @@ export default function CalendarScreen() {
           onSave={handleSaveShifts}
           onCancel={handleCancelEdit}
           onOpenAddMember={() => setAddMemberModalVisible(true)}
+          onToast={showToast}
         />
       )}
 

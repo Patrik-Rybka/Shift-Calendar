@@ -15,6 +15,12 @@ export interface PendingChange {
   timestamp: number;
 }
 
+export interface UndoSnapshot {
+  shifts: Record<string, DbShift>;
+  pendingChanges: Record<string, PendingChange>;
+  description?: string;
+}
+
 /**
  * Key format for fast O(1) lookup in calendar cells: `${userId}_${date}_${presetId}` (date is YYYY-MM-DD)
  */
@@ -83,6 +89,12 @@ export interface ShiftState {
   rangeStart: string | null; // YYYY-MM-DD
   rangeEnd: string | null; // YYYY-MM-DD
 
+  isEraserMode: boolean;
+  setEraserMode: (enabled: boolean) => void;
+  toggleEraserMode: () => void;
+  undoStack: UndoSnapshot[];
+  undo: () => string | null;
+
   // Actions
   setPresets: (presets: DbShiftPreset[]) => void;
   setShifts: (shiftsList: DbShift[], rangeStart?: string, rangeEnd?: string) => void;
@@ -130,11 +142,16 @@ export const useShiftStore = create<ShiftState>()(
       pendingChanges: {},
 
       isEditMode: false,
+      isEraserMode: false,
+      undoStack: [],
       editingUserId: null,
       editSubMode: 'stamp',
       selectedPresetId: null,
       rangeStart: null,
       rangeEnd: null,
+
+      setEraserMode: (enabled) => set({ isEraserMode: enabled }),
+      toggleEraserMode: () => set((state) => ({ isEraserMode: !state.isEraserMode })),
 
       setPresets: (presets) => set({ presets }),
 
@@ -205,9 +222,11 @@ export const useShiftStore = create<ShiftState>()(
         const presets = get().presets;
         set({
           isEditMode: enabled,
+          isEraserMode: enabled ? get().isEraserMode : false,
           rangeStart: null,
           rangeEnd: null,
           selectedPresetId: enabled ? (get().selectedPresetId || presets[0]?.id || null) : null,
+          undoStack: enabled ? get().undoStack : [],
         });
       },
 
@@ -217,11 +236,27 @@ export const useShiftStore = create<ShiftState>()(
       setRangeStart: (date) => set({ rangeStart: date }),
       setRangeEnd: (date) => set({ rangeEnd: date }),
       clearRangeSelection: () => set({ rangeStart: null, rangeEnd: null }),
-      discardPendingChanges: () => set({ pendingChanges: {}, syncStatus: 'synced' }),
+      discardPendingChanges: () => set({ pendingChanges: {}, syncStatus: 'synced', undoStack: [], isEraserMode: false }),
+
+      undo: () => {
+        const { undoStack } = get();
+        if (undoStack.length === 0) return null;
+        const previous = undoStack[undoStack.length - 1];
+        const newStack = undoStack.slice(0, -1);
+        const pendingCount = Object.keys(previous.pendingChanges).length;
+        set({
+          shifts: previous.shifts,
+          pendingChanges: previous.pendingChanges,
+          undoStack: newStack,
+          syncStatus: pendingCount > 0 ? 'pending' : 'synced',
+        });
+        return previous.description || 'Akce vrácena';
+      },
 
       applyShift: ({ groupId, userId, date, presetId, customHours, note }) => {
+        const state = get();
         const key = getShiftMapKey(userId, date, presetId);
-        const existing = get().shifts[key];
+        const existing = state.shifts[key];
 
         const updatedShift: DbShift = {
           id: existing?.id || `local_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
@@ -234,7 +269,14 @@ export const useShiftStore = create<ShiftState>()(
           updated_at: new Date().toISOString(),
         };
 
-        set((state) => ({
+        const snapshot: UndoSnapshot = {
+          shifts: { ...state.shifts },
+          pendingChanges: { ...state.pendingChanges },
+          description: 'Změna směny',
+        };
+        const nextUndoStack = [...state.undoStack.slice(-19), snapshot];
+
+        set({
           shifts: {
             ...state.shifts,
             [key]: updatedShift,
@@ -247,12 +289,19 @@ export const useShiftStore = create<ShiftState>()(
               timestamp: Date.now(),
             },
           },
+          undoStack: nextUndoStack,
           syncStatus: 'pending',
-        }));
+        });
       },
 
       removeShift: (groupId, userId, date, presetId) => {
         set((state) => {
+          const snapshot: UndoSnapshot = {
+            shifts: { ...state.shifts },
+            pendingChanges: { ...state.pendingChanges },
+            description: 'Smazání směny',
+          };
+          const nextUndoStack = [...state.undoStack.slice(-19), snapshot];
           const nextShifts = { ...state.shifts };
           const nextPending = { ...state.pendingChanges };
 
@@ -293,6 +342,7 @@ export const useShiftStore = create<ShiftState>()(
           return {
             shifts: nextShifts,
             pendingChanges: nextPending,
+            undoStack: nextUndoStack,
             syncStatus: 'pending',
           };
         });

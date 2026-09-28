@@ -8,7 +8,6 @@ import {
   Animated,
 } from 'react-native';
 import { useColorScheme } from '@/hooks/use-color-scheme';
-import * as Clipboard from 'expo-clipboard';
 import { useRouter } from 'expo-router';
 import {
   ChevronLeft,
@@ -16,13 +15,13 @@ import {
   Pencil,
   Save,
   Settings,
-  Copy,
-  Check,
   CloudOff,
   Users,
   Calendar as CalendarIcon,
   List,
   User,
+  Eraser,
+  RotateCcw,
 } from 'lucide-react-native';
 import { useShiftStore } from '@/store/useShiftStore';
 import { useAuthStore } from '@/store/useAuthStore';
@@ -46,9 +45,10 @@ const CZECH_MONTHS = [
 interface CalendarHeaderProps {
   onSave?: () => Promise<void>;
   onAutoSaveMonth?: () => Promise<void>;
+  onToast?: (msg: string) => void;
 }
 
-export default function CalendarHeader({ onSave, onAutoSaveMonth }: CalendarHeaderProps) {
+export default function CalendarHeader({ onSave, onAutoSaveMonth, onToast }: CalendarHeaderProps) {
   const router = useRouter();
   const isDark = useColorScheme() === 'dark';
 
@@ -61,6 +61,10 @@ export default function CalendarHeader({ onSave, onAutoSaveMonth }: CalendarHead
     setCurrentMonth,
     isEditMode,
     setEditMode,
+    isEraserMode,
+    setEraserMode,
+    undoStack,
+    undo,
     editingUserId,
     setEditingUserId,
     syncStatus,
@@ -68,7 +72,6 @@ export default function CalendarHeader({ onSave, onAutoSaveMonth }: CalendarHead
     pendingChanges,
   } = useShiftStore();
 
-  const [copied, setCopied] = useState(false);
   const [syncingManual, setSyncingManual] = useState(false);
 
   const pendingCount = Object.keys(pendingChanges || {}).length;
@@ -122,11 +125,34 @@ export default function CalendarHeader({ onSave, onAutoSaveMonth }: CalendarHead
     now.getMonth() === validMonth.getMonth() &&
     now.getFullYear() === validMonth.getFullYear();
 
-  const handleCopyCode = async () => {
-    if (!currentGroup?.join_code) return;
-    await Clipboard.setStringAsync(currentGroup.join_code);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+  const handleEraserToggle = () => {
+    if (!isEditMode) {
+      if (defaultEditMemberMode === 'always_me' && currentUser) {
+        setEditingUserId(currentUser.id);
+      } else if (!editingUserId && currentUser) {
+        setEditingUserId(currentUser.id);
+      }
+      setEditMode(true);
+      setEraserMode(true);
+      onToast?.('🧹 Režim mazání aktivován. Klepněte na den pro smazání směny.');
+    } else {
+      const next = !isEraserMode;
+      setEraserMode(next);
+      if (next) {
+        onToast?.('🧹 Režim mazání aktivován. Klepněte na den pro smazání směny.');
+      } else {
+        onToast?.('Režim mazání vypnut.');
+      }
+    }
+  };
+
+  const handleUndo = () => {
+    if (undoStack.length === 0) {
+      onToast?.('Žádné akce k vrácení');
+      return;
+    }
+    const desc = undo();
+    onToast?.(`↩️ ${desc || 'Akce vrácena'}`);
   };
 
   const handleManualSync = async () => {
@@ -254,32 +280,74 @@ export default function CalendarHeader({ onSave, onAutoSaveMonth }: CalendarHead
     <View style={styles.container}>
       {/* Top Status & Quick Bar */}
       <View style={styles.topRow}>
-        {/* Group Join Code Pill */}
-        <TouchableOpacity
-          style={[styles.groupCodePill, { backgroundColor: ui.card, borderColor: ui.border }]}
-          activeOpacity={0.7}
-          onPress={handleCopyCode}
-        >
-          <Users size={14} color={ui.accent} />
-          <Text style={[styles.groupCodeText, { color: ui.text }]} maxFontSizeMultiplier={1.2}>
-            {currentGroup?.join_code || '------'}
-          </Text>
-          {copied ? (
-            <Check size={13} color="#10B981" strokeWidth={2.5} />
-          ) : (
-            <Copy size={12} color={ui.textMuted} />
-          )}
-        </TouchableOpacity>
-
-        {/* Sync Status Badge */}
+        {/* Sync Status Badge on Left */}
         {renderSyncIndicator()}
 
         <View style={styles.actionsRight}>
+          {/* Undo Action (↩️) - shown when in edit mode or when actions exist */}
+          {(isEditMode || undoStack.length > 0) && (
+            <TouchableOpacity
+              style={[
+                styles.iconButton,
+                {
+                  backgroundColor: ui.card,
+                  borderColor: ui.border,
+                  opacity: undoStack.length > 0 ? 1 : 0.4,
+                },
+              ]}
+              onPress={handleUndo}
+              disabled={undoStack.length === 0}
+              activeOpacity={0.75}
+              hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
+              accessibilityLabel="Vrátit zpět"
+            >
+              <RotateCcw size={16} color={ui.text} />
+            </TouchableOpacity>
+          )}
+
+          {/* Eraser / Smazat Tool */}
+          <TouchableOpacity
+            style={[
+              styles.eraserHeaderBtn,
+              isEraserMode
+                ? {
+                    backgroundColor: isDark ? 'rgba(239, 68, 68, 0.22)' : '#FEE2E2',
+                    borderColor: '#EF4444',
+                  }
+                : {
+                    backgroundColor: ui.card,
+                    borderColor: ui.border,
+                  },
+            ]}
+            onPress={handleEraserToggle}
+            activeOpacity={0.75}
+            hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
+            accessibilityLabel="Režim mazání"
+          >
+            <Eraser
+              size={15}
+              color={isEraserMode ? '#EF4444' : ui.textMuted}
+              strokeWidth={isEraserMode ? 2.5 : 2}
+            />
+            <Text
+              style={[
+                styles.eraserHeaderText,
+                {
+                  color: isEraserMode ? (isDark ? '#FCA5A5' : '#B91C1C') : ui.text,
+                  fontWeight: isEraserMode ? '800' : '600',
+                },
+              ]}
+              maxFontSizeMultiplier={1.2}
+            >
+              Smazat
+            </Text>
+          </TouchableOpacity>
+
           {/* Settings Button */}
           <TouchableOpacity
             style={[styles.iconButton, { backgroundColor: ui.card, borderColor: ui.border }]}
             onPress={() => router.push('/settings' as any)}
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
           >
             <Settings size={18} color={ui.text} />
           </TouchableOpacity>
@@ -498,6 +566,18 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  eraserHeaderBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    height: 38,
+    paddingHorizontal: 11,
+    borderRadius: 12,
+    borderWidth: 1,
+  },
+  eraserHeaderText: {
+    fontSize: 12.5,
   },
   editButton: {
     flexDirection: 'row',

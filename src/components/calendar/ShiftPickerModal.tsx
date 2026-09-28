@@ -471,7 +471,24 @@ export default function ShiftPickerModal({
                 },
               ]}
               activeOpacity={0.75}
-              onPress={() => onSelectPreset('__DELETE__', null)}
+              onPress={() => {
+                if (isAllFamily) {
+                  Alert.alert(
+                    'Smazat pro celou rodinu?',
+                    'Opravdu si přejete smazat směny pro VŠECHNY členy rodiny na vybrané dny?',
+                    [
+                      { text: 'Zrušit', style: 'cancel' },
+                      {
+                        text: 'Ano, smazat všem',
+                        style: 'destructive',
+                        onPress: () => onSelectPreset('__DELETE__', null),
+                      },
+                    ]
+                  );
+                } else {
+                  onSelectPreset('__DELETE__', null);
+                }
+              }}
             >
               <View style={[styles.cardColorBar, { backgroundColor: ui.deleteColor }]} />
 
@@ -479,11 +496,15 @@ export default function ShiftPickerModal({
                 <View style={styles.deleteTitleRow}>
                   <Eraser size={16} color={ui.deleteColor} />
                   <Text style={[styles.cardTitle, { color: ui.deleteColor }]}>
-                    Volno / Smazat směnu
+                    {isAllFamily
+                      ? 'Volno / Smazat pro celou rodinu'
+                      : `Volno / Smazat směnu (${activeMember?.display_name || 'vybraný člen'})`}
                   </Text>
                 </View>
                 <Text style={[styles.cardTimeText, { color: isDark ? '#FCA5A5' : '#991B1B' }]}>
-                  Odstraní jakoukoli zapsanou směnu z vybraných dnů
+                  {isAllFamily
+                    ? 'Odstraní směny pro všechny členy rodiny z vybraných dnů'
+                    : `Odstraní směnu pouze pro: ${activeMember?.display_name || 'vybraného člena'}`}
                 </Text>
               </View>
             </TouchableOpacity>
