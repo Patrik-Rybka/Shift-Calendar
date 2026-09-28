@@ -41,6 +41,7 @@ import EditToolbar from '@/components/calendar/EditToolbar';
 import ShiftPickerModal from '@/components/calendar/ShiftPickerModal';
 import SuccessConfettiModal from '@/components/common/SuccessConfettiModal';
 import AddMemberModal from '@/components/calendar/AddMemberModal';
+import DayView from '@/components/calendar/DayView';
 import { getCurrentAppVersion } from '@/services/updateService';
 
 function formatCzechDateFull(dateStr: string): string {
@@ -1030,104 +1031,111 @@ export default function CalendarScreen() {
       {/* 1. Calendar Header (Month navigation, Sync badge, Group Code, Edit toggle) */}
       <CalendarHeader onSave={handleSaveShifts} onAutoSaveMonth={handleAutoSaveOnMonthSwitch} />
 
-      {/* 2. Main Scrollable Calendar Grid (Never blocked by EditMode, zero layout jump) */}
-      <ScrollView
-        scrollEnabled={true}
-        contentContainerStyle={[styles.scrollContent, isEditMode && { paddingBottom: 180 }]}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            tintColor={ui.accent}
-            colors={[ui.accent]}
-          />
-        }
-        showsVerticalScrollIndicator={false}
-      >
-        <CalendarGrid
-          onDayPress={handleDayPress}
-          renderCellContent={renderCellContent}
-          renderCellBg={renderCellBg}
-          renderCellCorner={renderCellCorner}
-          isDateSelected={isDateSelected}
-          isEditMode={isEditMode}
-          onRangeDragChange={handleRangeDragChange}
-          onRangeDragComplete={handleRangeDragComplete}
-          onDayTapInEditMode={handleDayTapInEditMode}
+      {/* 2. Main Calendar Content: DayView vs Month View Grid */}
+      {calendarView === 'day' ? (
+        <DayView
+          onEditDay={handleEditThisDay}
+          onMakeShiftForWholeFamily={handleMakeShiftForWholeFamily}
         />
+      ) : (
+        <ScrollView
+          scrollEnabled={true}
+          contentContainerStyle={[styles.scrollContent, isEditMode && { paddingBottom: 180 }]}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              tintColor={ui.accent}
+              colors={[ui.accent]}
+            />
+          }
+          showsVerticalScrollIndicator={false}
+        >
+          <CalendarGrid
+            onDayPress={handleDayPress}
+            renderCellContent={renderCellContent}
+            renderCellBg={renderCellBg}
+            renderCellCorner={renderCellCorner}
+            isDateSelected={isDateSelected}
+            isEditMode={isEditMode}
+            onRangeDragChange={handleRangeDragChange}
+            onRangeDragComplete={handleRangeDragComplete}
+            onDayTapInEditMode={handleDayTapInEditMode}
+          />
 
-        {/* Legend / Quick Family Summary (Visible in View Mode only) */}
-        {!isEditMode && (
-          <View style={[styles.familySummaryBox, { backgroundColor: ui.card, borderColor: ui.border }]}>
-            <View style={styles.summaryTitleRow}>
-              <View style={styles.summaryTitleLeft}>
-                <Users size={16} color={ui.accent} />
-                <Text style={[styles.summaryTitle, { color: ui.text }]}>
-                  Rodina ({Array.isArray(groupMembers) ? groupMembers.length : 0})
-                </Text>
-              </View>
-              <View style={styles.summaryActionsRight}>
-                <TouchableOpacity
-                  style={[styles.addMemberBtnSmall, { borderColor: ui.border, backgroundColor: isDark ? '#161F33' : '#F1F5F9' }]}
-                  onPress={() => setAddMemberModalVisible(true)}
-                  activeOpacity={0.75}
-                >
-                  <UserPlus size={13} color={ui.accent} />
-                  <Text style={[styles.addMemberBtnSmallText, { color: ui.accent }]}>+ Přidat člena</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-
-            <View style={styles.membersListRow}>
-              {orderedMembers.map((member) => {
-                if (!member || !member.id) return null;
-                const isHidden = Array.isArray(hiddenMemberIds) && hiddenMemberIds.includes(member.id);
-                const displayName = member.display_name || 'Člen';
-                const initialChar = displayName.trim().charAt(0).toUpperCase() || '?';
-
-                return (
+          {/* Legend / Quick Family Summary (Visible in View Mode only) */}
+          {!isEditMode && (
+            <View style={[styles.familySummaryBox, { backgroundColor: ui.card, borderColor: ui.border }]}>
+              <View style={styles.summaryTitleRow}>
+                <View style={styles.summaryTitleLeft}>
+                  <Users size={16} color={ui.accent} />
+                  <Text style={[styles.summaryTitle, { color: ui.text }]}>
+                    Rodina ({Array.isArray(groupMembers) ? groupMembers.length : 0})
+                  </Text>
+                </View>
+                <View style={styles.summaryActionsRight}>
                   <TouchableOpacity
-                    key={member.id}
-                    style={[
-                      styles.memberTag,
-                      {
-                        backgroundColor: isDark ? '#161F33' : '#F1F5F9',
-                        borderColor: isHidden ? (isDark ? 'rgba(255,255,255,0.06)' : '#CBD5E1') : ui.border,
-                        opacity: isHidden ? 0.45 : 1,
-                      },
-                    ]}
-                    onPress={() => toggleMemberVisibility(member.id)}
-                    activeOpacity={0.7}
+                    style={[styles.addMemberBtnSmall, { borderColor: ui.border, backgroundColor: isDark ? '#161F33' : '#F1F5F9' }]}
+                    onPress={() => setAddMemberModalVisible(true)}
+                    activeOpacity={0.75}
                   >
-                    <View style={[styles.legendAvatarCircle, { backgroundColor: isHidden ? '#64748B' : (member.color || '#2563EB') }]}>
-                      <Text style={styles.legendAvatarText}>
-                        {initialChar}
-                      </Text>
-                    </View>
-                    <Text
+                    <UserPlus size={13} color={ui.accent} />
+                    <Text style={[styles.addMemberBtnSmallText, { color: ui.accent }]}>+ Přidat člena</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              <View style={styles.membersListRow}>
+                {orderedMembers.map((member) => {
+                  if (!member || !member.id) return null;
+                  const isHidden = Array.isArray(hiddenMemberIds) && hiddenMemberIds.includes(member.id);
+                  const displayName = member.display_name || 'Člen';
+                  const initialChar = displayName.trim().charAt(0).toUpperCase() || '?';
+
+                  return (
+                    <TouchableOpacity
+                      key={member.id}
                       style={[
-                        styles.memberNameText,
+                        styles.memberTag,
                         {
-                          color: isHidden ? ui.textMuted : ui.text,
-                          textDecorationLine: isHidden ? 'line-through' : 'none',
+                          backgroundColor: isDark ? '#161F33' : '#F1F5F9',
+                          borderColor: isHidden ? (isDark ? 'rgba(255,255,255,0.06)' : '#CBD5E1') : ui.border,
+                          opacity: isHidden ? 0.45 : 1,
                         },
                       ]}
+                      onPress={() => toggleMemberVisibility(member.id)}
+                      activeOpacity={0.7}
                     >
-                      {displayName} {member.id === currentUser?.id && '(Já)'}
-                    </Text>
-                    {member.role === 'admin' && (
-                      <Crown size={12} color={isHidden ? ui.textMuted : '#F59E0B'} />
-                    )}
-                    {isHidden ? (
-                      <EyeOff size={12} color={ui.textMuted} />
-                    ) : null}
-                  </TouchableOpacity>
-                );
-              })}
+                      <View style={[styles.legendAvatarCircle, { backgroundColor: isHidden ? '#64748B' : (member.color || '#2563EB') }]}>
+                        <Text style={styles.legendAvatarText}>
+                          {initialChar}
+                        </Text>
+                      </View>
+                      <Text
+                        style={[
+                          styles.memberNameText,
+                          {
+                            color: isHidden ? ui.textMuted : ui.text,
+                            textDecorationLine: isHidden ? 'line-through' : 'none',
+                          },
+                        ]}
+                      >
+                        {displayName} {member.id === currentUser?.id && '(Já)'}
+                      </Text>
+                      {member.role === 'admin' && (
+                        <Crown size={12} color={isHidden ? ui.textMuted : '#F59E0B'} />
+                      )}
+                      {isHidden ? (
+                        <EyeOff size={12} color={ui.textMuted} />
+                      ) : null}
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
             </View>
-          </View>
-        )}
-      </ScrollView>
+          )}
+        </ScrollView>
+      )}
 
       {/* 3. Full-Screen Shift Picker Modal (revealed on tap or drag in Edit Mode) */}
       <ShiftPickerModal

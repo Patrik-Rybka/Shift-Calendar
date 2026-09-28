@@ -50,7 +50,7 @@ export default function CalendarHeader({ onSave, onAutoSaveMonth }: CalendarHead
   const isDark = useColorScheme() === 'dark';
 
   const { currentGroup, currentUser } = useAuthStore();
-  const { defaultEditMemberMode } = useSettingsStore();
+  const { defaultEditMemberMode, calendarView } = useSettingsStore();
   const {
     currentMonth,
     nextMonth,
@@ -310,39 +310,41 @@ export default function CalendarHeader({ onSave, onAutoSaveMonth }: CalendarHead
         </View>
       </View>
 
-      {/* Month Navigator Pill Card */}
-      <View style={[styles.navCard, { backgroundColor: ui.card, borderColor: ui.border }]}>
-        <TouchableOpacity
-          style={[styles.navArrow, { backgroundColor: ui.badgeBg }]}
-          onPress={handlePrevMonth}
-          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-        >
-          <ChevronLeft size={20} color={ui.text} />
-        </TouchableOpacity>
+      {/* Month Navigator Pill Card (Shown only in Month / Week view, DayView has its own day nav) */}
+      {calendarView !== 'day' && (
+        <View style={[styles.navCard, { backgroundColor: ui.card, borderColor: ui.border }]}>
+          <TouchableOpacity
+            style={[styles.navArrow, { backgroundColor: ui.badgeBg }]}
+            onPress={handlePrevMonth}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          >
+            <ChevronLeft size={20} color={ui.text} />
+          </TouchableOpacity>
 
-        <View style={styles.monthDisplayCenter}>
-          <Text style={[styles.monthTitle, { color: ui.text }]}>
-            {monthName} <Text style={[styles.yearTitle, { color: ui.textMuted }]}>{year}</Text>
-          </Text>
+          <View style={styles.monthDisplayCenter}>
+            <Text style={[styles.monthTitle, { color: ui.text }]}>
+              {monthName} <Text style={[styles.yearTitle, { color: ui.textMuted }]}>{year}</Text>
+            </Text>
 
-          {!isCurrentMonthNow && (
-            <TouchableOpacity
-              style={[styles.todayButton, { backgroundColor: ui.accentLight }]}
-              onPress={handleTodayMonth}
-            >
-              <Text style={[styles.todayButtonText, { color: ui.accent }]}>Dnes</Text>
-            </TouchableOpacity>
-          )}
+            {!isCurrentMonthNow && (
+              <TouchableOpacity
+                style={[styles.todayButton, { backgroundColor: ui.accentLight }]}
+                onPress={handleTodayMonth}
+              >
+                <Text style={[styles.todayButtonText, { color: ui.accent }]}>Dnes</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+
+          <TouchableOpacity
+            style={[styles.navArrow, { backgroundColor: ui.badgeBg }]}
+            onPress={handleNextMonth}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          >
+            <ChevronRight size={20} color={ui.text} />
+          </TouchableOpacity>
         </View>
-
-        <TouchableOpacity
-          style={[styles.navArrow, { backgroundColor: ui.badgeBg }]}
-          onPress={handleNextMonth}
-          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-        >
-          <ChevronRight size={20} color={ui.text} />
-        </TouchableOpacity>
-      </View>
+      )}
     </View>
   );
 }
