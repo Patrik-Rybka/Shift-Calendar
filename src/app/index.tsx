@@ -189,7 +189,7 @@ export default function CalendarScreen() {
     };
   }, [currentGroup?.id, currentMonth]);
 
-  // Step 6.2 & 6.3: Quiet auto-reconnect when offline (~45s calm timer, foreground only) + auto-flush
+  // Step 6.4: Zero battery drain - quiet auto-reconnect (~45s calm timer, foreground ONLY)
   useEffect(() => {
     if (syncStatus !== 'offline' || !currentGroup?.id) return;
 
@@ -197,7 +197,15 @@ export default function CalendarScreen() {
     const maxQuietRetries = 3;
     let timer: ReturnType<typeof setTimeout> | null = null;
 
+    const stopTimer = () => {
+      if (timer) {
+        clearTimeout(timer);
+        timer = null;
+      }
+    };
+
     const scheduleQuietReconnect = () => {
+      stopTimer();
       if (retryCount >= maxQuietRetries) {
         return;
       }
@@ -213,16 +221,31 @@ export default function CalendarScreen() {
           if (pendingCount > 0) {
             showToast(`✓ Offline změny (${pendingCount}) automaticky odeslány do cloudu`);
           }
-        } else if (useShiftStore.getState().syncStatus === 'offline') {
+        } else if (useShiftStore.getState().syncStatus === 'offline' && AppState.currentState === 'active') {
           scheduleQuietReconnect();
         }
       }, 45000); // 45 seconds quiet reconnect interval
     };
 
-    scheduleQuietReconnect();
+    // Start timer only if currently active in foreground
+    if (AppState.currentState === 'active') {
+      scheduleQuietReconnect();
+    }
+
+    // Step 6.4: Instantly cancel timer when phone is locked or app minimized to prevent CPU wakeups
+    const appStateSub = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'active') {
+        if (useShiftStore.getState().syncStatus === 'offline') {
+          scheduleQuietReconnect();
+        }
+      } else {
+        stopTimer();
+      }
+    });
 
     return () => {
-      if (timer) clearTimeout(timer);
+      stopTimer();
+      appStateSub.remove();
     };
   }, [syncStatus, currentGroup?.id, syncWithNeon, showToast]);
 
@@ -248,12 +271,20 @@ export default function CalendarScreen() {
     return () => clearTimeout(flushTimer);
   }, [pendingChanges, isEditMode, syncStatus, currentGroup?.id, syncWithNeon, showToast]);
 
-  // Auto-sync whenever user returns to the app from background or minimizes app
+  const appStateRef = useRef(AppState.currentState);
+
+  // Step 6.5: Lifesaver auto-save on app close / minimize / switch
+  // If user stamps shifts and forgets to tap "Save" before leaving the app,
+  // we gracefully commit pending changes and dispatch them to Neon.
   useEffect(() => {
     if (!currentGroup?.id) return;
 
     const subscription = AppState.addEventListener('change', (nextState) => {
+      const prevState = appStateRef.current;
+      appStateRef.current = nextState;
+
       if (nextState === 'active') {
+        // Returning to foreground: flush any pending offline shifts and sync fresh data
         const pendingCount = Object.keys(useShiftStore.getState().pendingChanges).length;
         syncWithNeon(currentGroup.id)
           .then((ok) => {
@@ -264,9 +295,20 @@ export default function CalendarScreen() {
           .catch((e) => {
             console.warn('Background foreground sync notice:', e);
           });
-      } else if (nextState === 'background' || nextState === 'inactive') {
-        const hasPending = Object.keys(useShiftStore.getState().pendingChanges).length > 0;
-        if (hasPending) {
+      } else if (
+        prevState === 'active' &&
+        (nextState === 'background' || nextState === 'inactive')
+      ) {
+        // App is leaving foreground (minimized, switched app, or screen locked)
+        const shiftState = useShiftStore.getState();
+        const pendingCount = Object.keys(shiftState.pendingChanges).length;
+        const wasInEditMode = shiftState.isEditMode;
+
+        if (wasInEditMode) {
+          shiftState.setEditMode(false);
+        }
+
+        if (pendingCount > 0) {
           syncWithNeon(currentGroup.id).catch((e) => {
             console.warn('Background auto-save notice:', e);
           });
