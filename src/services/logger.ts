@@ -3,7 +3,6 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
 import { checkNeonConnection } from './db/neonClient';
 import { useAuthStore } from '../store/useAuthStore';
-import { useShiftStore } from '../store/useShiftStore';
 
 export type LogLevel = 'info' | 'success' | 'warn' | 'error';
 
@@ -160,7 +159,14 @@ class DiagnosticLogger {
    */
   public async generateDiagnosticReport(): Promise<string> {
     const authState = useAuthStore.getState();
-    const shiftState = useShiftStore.getState();
+    let shiftState: any = null;
+    try {
+      // Dynamically load to break circular require cycle between logger.ts and useShiftStore.ts
+      const { useShiftStore } = require('../store/useShiftStore');
+      shiftState = useShiftStore?.getState ? useShiftStore.getState() : null;
+    } catch {
+      shiftState = null;
+    }
 
     // Perform live DB test
     const startTime = Date.now();
@@ -174,8 +180,8 @@ class DiagnosticLogger {
     }
 
     const appVersion = Constants.expoConfig?.version || '1.0.6';
-    const totalShifts = Object.keys(shiftState.shifts || {}).length;
-    const pendingChangesCount = Object.keys(shiftState.pendingChanges || {}).length;
+    const totalShifts = Object.keys(shiftState?.shifts || {}).length;
+    const pendingChangesCount = Object.keys(shiftState?.pendingChanges || {}).length;
 
     let report = `========================================\n`;
     report += `  DIAGNOSTICKÝ REPORT — KALENDÁŘ SMĚN\n`;
@@ -204,9 +210,9 @@ class DiagnosticLogger {
 
     report += `\n--- [PAMĚŤ & SYNCHRONIZACE] ---\n`;
     report += `Lokální směny:    ${totalShifts} směn v mezipaměti\n`;
-    report += `Předvolby:        ${shiftState.presets?.length || 0} typů směn\n`;
+    report += `Předvolby:        ${shiftState?.presets?.length || 0} typů směn\n`;
     report += `Čeká k odeslání:  ${pendingChangesCount} změn (offline fronta)\n`;
-    report += `Poslední sync:    ${shiftState.lastSyncedAt ? new Date(shiftState.lastSyncedAt).toLocaleString('cs-CZ') : 'Zatím nesynchronizováno'}\n`;
+    report += `Poslední sync:    ${shiftState?.lastSyncedAt ? new Date(shiftState.lastSyncedAt).toLocaleString('cs-CZ') : 'Zatím nesynchronizováno'}\n`;
     report += `Hydratace stavu:  ${authState.isHydrated ? '✅ Dokončena' : '⏳ Čeká'}\n`;
 
     report += `\n--- [ZÁZNAMNÍK UDÁLOSTÍ (${this.logs.length})] ---\n`;
