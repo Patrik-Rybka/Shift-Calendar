@@ -191,6 +191,10 @@ export default function SettingsScreen() {
     memberHiddenPresetIds,
     setMemberPresetHidden,
     resetMemberHiddenPresets,
+    calendarView,
+    setCalendarView,
+    defaultCalendarView,
+    setDefaultCalendarView,
   } = useSettingsStore();
 
   const [selectedMemberPresetFilterId, setSelectedMemberPresetFilterId] = useState<string | null>(null);
@@ -1588,6 +1592,80 @@ export default function SettingsScreen() {
           </View>
 
           <View style={styles.generalSettingsCardList}>
+            {/* 0. Výchozí zobrazení po spuštění */}
+            <View style={[styles.prefCard, { backgroundColor: ui.card, borderColor: ui.border }]}>
+              <View style={styles.prefTextCol}>
+                <Text style={[styles.prefTitle, { color: ui.text }]}>Výchozí zobrazení po spuštění</Text>
+                <Text style={[styles.prefSubtitle, { color: ui.textMuted }]}>
+                  Který pohled se má automaticky otevřít při startu aplikace
+                </Text>
+              </View>
+              <View style={[styles.segmentedRow, { backgroundColor: ui.inputBg }]}>
+                <TouchableOpacity
+                  style={[
+                    styles.segmentBtn,
+                    defaultCalendarView === 'month' && [styles.segmentBtnActive, { backgroundColor: ui.accent }],
+                  ]}
+                  onPress={() => {
+                    setDefaultCalendarView('month');
+                    setCalendarView('month');
+                  }}
+                  activeOpacity={0.8}
+                >
+                  <Text
+                    style={[
+                      styles.segmentBtnText,
+                      { color: defaultCalendarView === 'month' ? '#FFFFFF' : ui.textMuted },
+                    ]}
+                  >
+                    📅 Měsíc
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[
+                    styles.segmentBtn,
+                    defaultCalendarView === 'week' && [styles.segmentBtnActive, { backgroundColor: ui.accent }],
+                  ]}
+                  onPress={() => {
+                    setDefaultCalendarView('week');
+                    setCalendarView('week');
+                  }}
+                  activeOpacity={0.8}
+                >
+                  <Text
+                    style={[
+                      styles.segmentBtnText,
+                      { color: defaultCalendarView === 'week' ? '#FFFFFF' : ui.textMuted },
+                    ]}
+                  >
+                    📋 Týden
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[
+                    styles.segmentBtn,
+                    defaultCalendarView === 'day' && [styles.segmentBtnActive, { backgroundColor: ui.accent }],
+                  ]}
+                  onPress={() => {
+                    setDefaultCalendarView('day');
+                    setCalendarView('day');
+                  }}
+                  activeOpacity={0.8}
+                >
+                  <Text
+                    style={[
+                      styles.segmentBtnText,
+                      { color: defaultCalendarView === 'day' ? '#FFFFFF' : ui.textMuted },
+                    ]}
+                  >
+                    👤 Den
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+
             {/* 1. První den v týdnu */}
             <View style={[styles.prefCard, { backgroundColor: ui.card, borderColor: ui.border }]}>
               <View style={styles.prefTextCol}>

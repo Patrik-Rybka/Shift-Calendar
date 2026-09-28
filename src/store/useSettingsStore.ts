@@ -9,8 +9,20 @@ export type DefaultEditMemberMode = 'always_me' | 'remember_last';
 export type ThemeMode = 'system' | 'dark' | 'light';
 export type FontSizeScale = 'small' | 'medium' | 'large';
 export type CalendarDensity = 'comfortable' | 'compact';
+export type CalendarViewMode = 'month' | 'week' | 'day';
 
 export interface SettingsState {
+  /** Active view mode of calendar: 'month' | 'week' | 'day' */
+  calendarView: CalendarViewMode;
+  setCalendarView: (view: CalendarViewMode) => void;
+
+  /** Default view mode when opening the app */
+  defaultCalendarView: CalendarViewMode;
+  setDefaultCalendarView: (view: CalendarViewMode) => void;
+
+  /** Active selected date (YYYY-MM-DD) shared across Month, Week, and Day views */
+  selectedDate: string;
+  setSelectedDate: (date: string) => void;
   /** Visual style of shift items in calendar day cells (Step 7.4A) */
   cellStyle: CalendarCellStyle;
   setCellStyle: (style: CalendarCellStyle) => void;
@@ -73,6 +85,15 @@ export interface SettingsState {
 export const useSettingsStore = create<SettingsState>()(
   persist(
     (set, get) => ({
+      // Views & Selected Date
+      calendarView: 'month',
+      defaultCalendarView: 'month',
+      selectedDate: new Date().toISOString().split('T')[0],
+
+      setCalendarView: (calendarView) => set({ calendarView }),
+      setDefaultCalendarView: (defaultCalendarView) => set({ defaultCalendarView }),
+      setSelectedDate: (selectedDate) => set({ selectedDate }),
+
       // Step 7.4A
       cellStyle: 'blocks',
 

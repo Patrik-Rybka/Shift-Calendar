@@ -72,6 +72,11 @@ export default function CalendarScreen() {
     memberOrderIds,
     fontSizeScale,
     calendarDensity,
+    calendarView,
+    setCalendarView,
+    defaultCalendarView,
+    selectedDate,
+    setSelectedDate,
   } = useSettingsStore();
 
   const fontMultiplier = fontSizeScale === 'small' ? 0.88 : fontSizeScale === 'large' ? 1.18 : 1.0;
@@ -127,6 +132,13 @@ export default function CalendarScreen() {
       router.replace('/group-choice' as any);
     }
   }, [isHydrated, currentUser, currentGroup]);
+
+  // Synchronize initial calendar view with user's default setting upon app boot
+  useEffect(() => {
+    if (defaultCalendarView) {
+      setCalendarView(defaultCalendarView);
+    }
+  }, []);
 
   // Load presets & sync initial shifts
   useEffect(() => {
@@ -980,6 +992,7 @@ export default function CalendarScreen() {
   }, [currentGroup?.id, currentMonth, discardPendingChanges, setEditMode, showToast]);
 
   const handleDayPress = (day: CalendarDay) => {
+    setSelectedDate(day.dateStr);
     if (isEditMode) {
       handleDayTapInEditMode(day);
       return;
