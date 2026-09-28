@@ -33,7 +33,8 @@ export default function EditToolbar({ onSave, onCancel, onOpenAddMember }: EditT
   const isDark = useColorScheme() === 'dark';
   const insets = useSafeAreaInsets();
   const { currentUser, groupMembers } = useAuthStore();
-  const { memberOrderIds } = useSettingsStore();
+  const { memberOrderIds, fontSizeScale } = useSettingsStore();
+  const fontMultiplier = fontSizeScale === 'small' ? 0.88 : fontSizeScale === 'large' ? 1.18 : 1.0;
   const {
     isEditMode,
     setEditMode,
@@ -152,8 +153,18 @@ export default function EditToolbar({ onSave, onCancel, onOpenAddMember }: EditT
       {/* Row 1: Header with "Zapisuji pro" and Action buttons (Cancel / Save) */}
       <View style={styles.topRow}>
         <View style={styles.titleWithIcon}>
-          <Users size={15} color={ui.accent} />
-          <Text style={[styles.sectionTitle, { color: ui.text }]}>Zapisuji směny pro:</Text>
+          <Users size={14} color={ui.accent} />
+          <Text
+            style={[
+              styles.sectionTitle,
+              { color: ui.text, fontSize: Math.min(13 * fontMultiplier, 14.5) },
+            ]}
+            numberOfLines={1}
+            ellipsizeMode="tail"
+            maxFontSizeMultiplier={1.2}
+          >
+            Zapisuji pro:
+          </Text>
         </View>
 
         <View style={styles.actionButtons}>
@@ -163,8 +174,16 @@ export default function EditToolbar({ onSave, onCancel, onOpenAddMember }: EditT
             disabled={isSaving}
             onPress={handleCancel}
           >
-            <X size={14} color={ui.textMuted} strokeWidth={2.5} />
-            <Text style={[styles.cancelBtnText, { color: ui.textMuted }]}>Zrušit</Text>
+            <X size={13} color={ui.textMuted} strokeWidth={2.5} />
+            <Text
+              style={[
+                styles.cancelBtnText,
+                { color: ui.textMuted, fontSize: Math.min(12.5 * fontMultiplier, 13.5) },
+              ]}
+              maxFontSizeMultiplier={1.2}
+            >
+              Zrušit
+            </Text>
           </TouchableOpacity>
 
           <Animated.View style={{ transform: [{ scale: pulseAnim }] }}>
@@ -182,11 +201,21 @@ export default function EditToolbar({ onSave, onCancel, onOpenAddMember }: EditT
                 <ActivityIndicator size="small" color="#FFFFFF" style={{ paddingHorizontal: 10 }} />
               ) : (
                 <>
-                  <Save size={14} color="#FFFFFF" strokeWidth={2.5} />
-                  <Text style={styles.saveBtnText}>Uložit</Text>
+                  <Save size={13} color="#FFFFFF" strokeWidth={2.5} />
+                  <Text
+                    style={[
+                      styles.saveBtnText,
+                      { fontSize: Math.min(12.5 * fontMultiplier, 13.5) },
+                    ]}
+                    maxFontSizeMultiplier={1.2}
+                  >
+                    Uložit
+                  </Text>
                   {hasPending && (
                     <View style={styles.pendingBadgeCircle}>
-                      <Text style={styles.pendingBadgeCircleText}>{pendingCount}</Text>
+                      <Text style={styles.pendingBadgeCircleText} maxFontSizeMultiplier={1.2}>
+                        {pendingCount}
+                      </Text>
                     </View>
                   )}
                 </>
@@ -274,7 +303,7 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
-    paddingHorizontal: 16,
+    paddingHorizontal: 12,
     paddingTop: 12,
     gap: 10,
     shadowColor: '#000',
@@ -288,11 +317,15 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    gap: 8,
   },
   titleWithIcon: {
+    flex: 1,
+    flexShrink: 1,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
+    overflow: 'hidden',
   },
   sectionTitle: {
     fontSize: 13,
@@ -302,13 +335,14 @@ const styles = StyleSheet.create({
   actionButtons: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 6,
+    flexShrink: 0,
   },
   cancelBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 5,
-    paddingHorizontal: 12,
+    gap: 4,
+    paddingHorizontal: 10,
     paddingVertical: 7,
     borderRadius: 12,
     borderWidth: 1,
@@ -320,8 +354,8 @@ const styles = StyleSheet.create({
   saveBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 14,
+    gap: 5,
+    paddingHorizontal: 12,
     paddingVertical: 7,
     borderRadius: 12,
     shadowColor: '#10B981',

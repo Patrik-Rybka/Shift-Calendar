@@ -261,7 +261,7 @@ export default function CalendarHeader({ onSave, onAutoSaveMonth }: CalendarHead
           onPress={handleCopyCode}
         >
           <Users size={14} color={ui.accent} />
-          <Text style={[styles.groupCodeText, { color: ui.text }]}>
+          <Text style={[styles.groupCodeText, { color: ui.text }]} maxFontSizeMultiplier={1.2}>
             {currentGroup?.join_code || '------'}
           </Text>
           {copied ? (
@@ -306,10 +306,10 @@ export default function CalendarHeader({ onSave, onAutoSaveMonth }: CalendarHead
                 ) : (
                   <>
                     <Save size={15} color="#FFFFFF" strokeWidth={2.5} />
-                    <Text style={styles.editButtonText}>Uložit</Text>
+                    <Text style={styles.editButtonText} maxFontSizeMultiplier={1.2}>Uložit</Text>
                     {hasPending && (
                       <View style={styles.pendingBadgeCircle}>
-                        <Text style={styles.pendingBadgeCircleText}>{pendingCount}</Text>
+                        <Text style={styles.pendingBadgeCircleText} maxFontSizeMultiplier={1.2}>{pendingCount}</Text>
                       </View>
                     )}
                   </>
@@ -317,7 +317,7 @@ export default function CalendarHeader({ onSave, onAutoSaveMonth }: CalendarHead
               ) : (
                 <>
                   <Pencil size={15} color="#FFFFFF" strokeWidth={2.5} />
-                  <Text style={styles.editButtonText}>Upravit</Text>
+                  <Text style={styles.editButtonText} maxFontSizeMultiplier={1.2}>Upravit</Text>
                 </>
               )}
             </TouchableOpacity>
@@ -443,6 +443,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    gap: 6,
   },
   groupCodePill: {
     flexDirection: 'row',
@@ -457,6 +458,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.05,
     shadowRadius: 3,
     elevation: 1,
+    flexShrink: 1,
   },
   groupCodeText: {
     fontSize: 13,
@@ -471,6 +473,7 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     borderRadius: 12,
     borderWidth: 1,
+    flexShrink: 0,
   },
   statusDot: {
     width: 6,
@@ -484,7 +487,8 @@ const styles = StyleSheet.create({
   actionsRight: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 6,
+    flexShrink: 0,
   },
   iconButton: {
     width: 38,
