@@ -61,20 +61,33 @@ export async function batchDeleteShifts(targets: ShiftDeleteTarget[]): Promise<b
 
   try {
     const deletePromises = targets.map((target) => {
-      if (target.presetId !== undefined) {
+      const dateStr = typeof target.date === 'string' ? target.date.split('T')[0] : target.date;
+
+      if (target.presetId === null) {
         return sql`
           DELETE FROM shifts
           WHERE group_id = ${target.groupId}
             AND user_id = ${target.userId}
-            AND date = ${target.date}
-            AND (shift_preset_id = ${target.presetId} OR (shift_preset_id IS NULL AND ${target.presetId} IS NULL));
+            AND date = ${dateStr}::DATE
+            AND shift_preset_id IS NULL;
         `;
       }
+
+      if (target.presetId !== undefined && target.presetId !== null && target.presetId !== '') {
+        return sql`
+          DELETE FROM shifts
+          WHERE group_id = ${target.groupId}
+            AND user_id = ${target.userId}
+            AND date = ${dateStr}::DATE
+            AND shift_preset_id = ${target.presetId};
+        `;
+      }
+
       return sql`
         DELETE FROM shifts
         WHERE group_id = ${target.groupId}
           AND user_id = ${target.userId}
-          AND date = ${target.date};
+          AND date = ${dateStr}::DATE;
       `;
     });
     await Promise.all(deletePromises);
