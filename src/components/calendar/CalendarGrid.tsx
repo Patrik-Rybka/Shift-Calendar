@@ -30,7 +30,7 @@ interface CalendarGridProps {
   onDayTapInEditMode?: (day: CalendarDay) => void;
 }
 
-export default function CalendarGrid({
+function CalendarGrid({
   onDayPress,
   onDayLongPress,
   renderCellContent,
@@ -603,3 +603,5 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
 });
+
+export default React.memo(CalendarGrid);

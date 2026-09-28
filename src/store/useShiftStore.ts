@@ -22,19 +22,42 @@ export function getShiftMapKey(userId: string, date: string, presetId?: string |
   return presetId ? `${userId}_${date}_${presetId}` : `${userId}_${date}_note`;
 }
 
+let cachedShiftsRef: Record<string, DbShift> | null = null;
+let cachedUserDateMap = new Map<string, DbShift[]>();
+
 /**
  * Returns all shifts for a user on a given date (supporting multiple shifts/events per day).
+ * Fast O(1) indexed lookup memoized against shifts object reference.
  */
 export function getUserShiftsForDay(shifts: Record<string, DbShift> | undefined | null, userId: string, date: string): DbShift[] {
   if (!shifts) return [];
-  const prefix = `${userId}_${date}`;
-  const result: DbShift[] = [];
-  for (const [key, shift] of Object.entries(shifts)) {
-    if (key.startsWith(prefix) || (shift && shift.user_id === userId && shift.date === date)) {
-      result.push(shift);
+
+  if (cachedShiftsRef !== shifts) {
+    cachedShiftsRef = shifts;
+    const nextMap = new Map<string, DbShift[]>();
+
+    for (const [key, shift] of Object.entries(shifts)) {
+      if (!shift) continue;
+      const dateStr = typeof shift.date === 'string'
+        ? shift.date.split('T')[0]
+        : (shift.date ? new Date(shift.date).toISOString().split('T')[0] : '');
+
+      const effectiveUserId = shift.user_id || key.split('_')[0] || '';
+      const effectiveDate = dateStr || key.split('_')[1] || '';
+      const userDateKey = `${effectiveUserId}_${effectiveDate}`;
+
+      const existing = nextMap.get(userDateKey);
+      if (existing) {
+        existing.push(shift);
+      } else {
+        nextMap.set(userDateKey, [shift]);
+      }
     }
+    cachedUserDateMap = nextMap;
   }
-  return result;
+
+  const matches = cachedUserDateMap.get(`${userId}_${date}`);
+  return matches || [];
 }
 
 export interface ShiftState {
@@ -148,7 +171,18 @@ export const useShiftStore = create<ShiftState>()(
 
       setCurrentMonth: (date) => {
         const safe = date instanceof Date && !isNaN(date.getTime()) ? date : new Date(date);
-        set({ currentMonth: isNaN(safe.getTime()) ? new Date(new Date().getFullYear(), new Date().getMonth(), 1) : safe });
+        const valid = isNaN(safe.getTime()) ? new Date(new Date().getFullYear(), new Date().getMonth(), 1) : safe;
+        const current = get().currentMonth;
+        if (
+          current instanceof Date &&
+          !isNaN(current.getTime()) &&
+          current.getFullYear() === valid.getFullYear() &&
+          current.getMonth() === valid.getMonth()
+        ) {
+          // Same month & year: keep existing Date reference to prevent unnecessary component re-renders & re-syncs
+          return;
+        }
+        set({ currentMonth: new Date(valid.getFullYear(), valid.getMonth(), 1) });
       },
 
       nextMonth: () => {

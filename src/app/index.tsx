@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useRef } from 'react';
+import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import {
   View,
   Text,
@@ -357,239 +357,262 @@ export default function CalendarScreen() {
     });
   }, [groupMembers, memberOrderIds]);
 
-  // Helper to extract shifts for a given calendar day (Step 7.4C respects ordering and hidden filter, groups shared events)
-  const getDayShifts = (day: CalendarDay) => {
-    const list: Array<{
-      member: typeof groupMembers[0];
-      members?: Array<typeof groupMembers[0]>;
-      isAllMembers?: boolean;
-      isShared?: boolean;
-      memberNames?: string;
-      preset?: typeof presets[0];
-      customHours?: number | null;
-      note?: string | null;
-      color: string;
-      title: string;
-    }> = [];
+  // Memoized Map of shift presets for O(1) instant lookup
+  const presetMap = useMemo(() => {
+    const map = new Map<string, typeof presets[0]>();
+    if (Array.isArray(presets)) {
+      for (const p of presets) {
+        if (p && p.id) map.set(p.id, p);
+      }
+    }
+    return map;
+  }, [presets]);
 
-    const safeHidden = Array.isArray(hiddenMemberIds) ? hiddenMemberIds : [];
-    const safeShifts = shifts || {};
-    const safePresets = Array.isArray(presets) ? presets : [];
-    const visibleMembers = orderedMembers.filter((m) => m && m.id && !safeHidden.includes(m.id));
-
-    // Group shifts by preset ID to detect shared family events
-    const presetGroups: Record<
-      string,
-      Array<{
+  // Helper to extract shifts for a given calendar day (memoized with fast lookups)
+  const getDayShifts = useCallback(
+    (day: CalendarDay) => {
+      const list: Array<{
         member: typeof groupMembers[0];
+        members?: Array<typeof groupMembers[0]>;
+        isAllMembers?: boolean;
+        isShared?: boolean;
+        memberNames?: string;
+        preset?: typeof presets[0];
         customHours?: number | null;
         note?: string | null;
-        preset?: typeof presets[0];
         color: string;
         title: string;
-      }>
-    > = {};
+      }> = [];
 
-    for (const member of visibleMembers) {
-      const memberShifts = getUserShiftsForDay(safeShifts, member.id, day.dateStr);
-      for (const shift of memberShifts) {
-        if (shift && shift.shift_preset_id) {
-          const preset = safePresets.find((p) => p && p.id === shift.shift_preset_id);
-          const color = preset?.color || member.color || '#2563EB';
-          const title = preset?.title || preset?.short_code || 'Směna';
-          if (!presetGroups[shift.shift_preset_id]) {
-            presetGroups[shift.shift_preset_id] = [];
+      const safeHidden = Array.isArray(hiddenMemberIds) ? hiddenMemberIds : [];
+      const safeShifts = shifts || {};
+      const visibleMembers = orderedMembers.filter((m) => m && m.id && !safeHidden.includes(m.id));
+
+      // Group shifts by preset ID to detect shared family events
+      const presetGroups: Record<
+        string,
+        Array<{
+          member: typeof groupMembers[0];
+          customHours?: number | null;
+          note?: string | null;
+          preset?: typeof presets[0];
+          color: string;
+          title: string;
+        }>
+      > = {};
+
+      for (const member of visibleMembers) {
+        const memberShifts = getUserShiftsForDay(safeShifts, member.id, day.dateStr);
+        for (const shift of memberShifts) {
+          if (shift && shift.shift_preset_id) {
+            const preset = presetMap.get(shift.shift_preset_id);
+            const color = preset?.color || member.color || '#2563EB';
+            const title = preset?.title || preset?.short_code || 'Směna';
+            if (!presetGroups[shift.shift_preset_id]) {
+              presetGroups[shift.shift_preset_id] = [];
+            }
+            presetGroups[shift.shift_preset_id].push({
+              member,
+              customHours: shift.custom_hours,
+              note: shift.note,
+              preset,
+              color,
+              title,
+            });
           }
-          presetGroups[shift.shift_preset_id].push({
-            member,
-            customHours: shift.custom_hours,
-            note: shift.note,
-            preset,
-            color,
-            title,
+        }
+      }
+
+      for (const [, entries] of Object.entries(presetGroups)) {
+        if (entries.length > 1) {
+          // Shared by 2 or more family members!
+          const isAll = entries.length === visibleMembers.length && visibleMembers.length > 1;
+          const first = entries[0];
+          const sharedNote = entries.find((e) => e.note && e.note.trim().length > 0)?.note || null;
+          list.push({
+            member: first.member,
+            members: entries.map((e) => e.member),
+            isAllMembers: isAll,
+            isShared: true,
+            memberNames: isAll ? 'Celá rodina' : entries.map((e) => e.member.display_name).join(', '),
+            preset: first.preset,
+            customHours: first.customHours,
+            note: sharedNote,
+            color: first.color,
+            title: first.title,
+          });
+        } else {
+          // Individual member shift
+          const e = entries[0];
+          list.push({
+            member: e.member,
+            members: [e.member],
+            isAllMembers: false,
+            isShared: false,
+            memberNames: e.member.display_name,
+            preset: e.preset,
+            customHours: e.customHours,
+            note: e.note,
+            color: e.color,
+            title: e.title,
           });
         }
       }
-    }
 
-    for (const [presetId, entries] of Object.entries(presetGroups)) {
-      if (entries.length > 1) {
-        // Shared by 2 or more family members!
-        const isAll = entries.length === visibleMembers.length && visibleMembers.length > 1;
-        const first = entries[0];
-        const sharedNote = entries.find((e) => e.note && e.note.trim().length > 0)?.note || null;
-        list.push({
-          member: first.member,
-          members: entries.map((e) => e.member),
-          isAllMembers: isAll,
-          isShared: true,
-          memberNames: isAll ? 'Celá rodina' : entries.map((e) => e.member.display_name).join(', '),
-          preset: first.preset,
-          customHours: first.customHours,
-          note: sharedNote,
-          color: first.color,
-          title: first.title,
-        });
-      } else {
-        // Individual member shift
-        const e = entries[0];
-        list.push({
-          member: e.member,
-          members: [e.member],
-          isAllMembers: false,
-          isShared: false,
-          memberNames: e.member.display_name,
-          preset: e.preset,
-          customHours: e.customHours,
-          note: e.note,
-          color: e.color,
-          title: e.title,
-        });
-      }
-    }
+      return list;
+    },
+    [shifts, presetMap, orderedMembers, hiddenMemberIds]
+  );
 
-    return list;
-  };
+  // Helper to extract note-only entries for a day (memoized)
+  const getDayNoteOnlyEntries = useCallback(
+    (day: CalendarDay) => {
+      const list: Array<{
+        member: typeof groupMembers[0];
+        members?: Array<typeof groupMembers[0]>;
+        isAllMembers?: boolean;
+        note: string;
+        color: string;
+      }> = [];
 
-  // Helper to extract note-only entries for a day (member has a note, but NO shift preset)
-  const getDayNoteOnlyEntries = (day: CalendarDay) => {
-    const list: Array<{
-      member: typeof groupMembers[0];
-      members?: Array<typeof groupMembers[0]>;
-      isAllMembers?: boolean;
-      note: string;
-      color: string;
-    }> = [];
+      const safeHidden = Array.isArray(hiddenMemberIds) ? hiddenMemberIds : [];
+      const safeShifts = shifts || {};
+      const visibleMembers = orderedMembers.filter((m) => m && m.id && !safeHidden.includes(m.id));
 
-    const safeHidden = Array.isArray(hiddenMemberIds) ? hiddenMemberIds : [];
-    const safeShifts = shifts || {};
-    const visibleMembers = orderedMembers.filter((m) => m && m.id && !safeHidden.includes(m.id));
+      // Deduplicate notes that are identical across members
+      const noteMap: Record<string, Array<typeof groupMembers[0]>> = {};
 
-    // Deduplicate notes that are identical across members
-    const noteMap: Record<string, Array<typeof groupMembers[0]>> = {};
-
-    for (const member of visibleMembers) {
-      const memberShifts = getUserShiftsForDay(safeShifts, member.id, day.dateStr);
-      for (const shift of memberShifts) {
-        if (shift && !shift.shift_preset_id && typeof shift.note === 'string' && shift.note.trim().length > 0) {
-          const text = shift.note.trim();
-          if (!noteMap[text]) noteMap[text] = [];
-          noteMap[text].push(member);
+      for (const member of visibleMembers) {
+        const memberShifts = getUserShiftsForDay(safeShifts, member.id, day.dateStr);
+        for (const shift of memberShifts) {
+          if (shift && !shift.shift_preset_id && typeof shift.note === 'string' && shift.note.trim().length > 0) {
+            const text = shift.note.trim();
+            if (!noteMap[text]) noteMap[text] = [];
+            noteMap[text].push(member);
+          }
         }
       }
-    }
 
-    for (const [text, membersWithNote] of Object.entries(noteMap)) {
-      const isAll = membersWithNote.length === visibleMembers.length && visibleMembers.length > 1;
-      list.push({
-        member: membersWithNote[0],
-        members: membersWithNote,
-        isAllMembers: isAll,
-        note: text,
-        color: isAll ? '#8B5CF6' : (membersWithNote[0].color || '#F59E0B'),
-      });
-    }
+      for (const [text, membersWithNote] of Object.entries(noteMap)) {
+        const isAll = membersWithNote.length === visibleMembers.length && visibleMembers.length > 1;
+        list.push({
+          member: membersWithNote[0],
+          members: membersWithNote,
+          isAllMembers: isAll,
+          note: text,
+          color: isAll ? '#8B5CF6' : (membersWithNote[0].color || '#F59E0B'),
+        });
+      }
 
-    return list;
-  };
+      return list;
+    },
+    [shifts, orderedMembers, hiddenMemberIds]
+  );
 
-  // Prominent corner indicator for days with a note but without any shift preset
-  const renderCellCorner = (day: CalendarDay) => {
-    const noteOnly = getDayNoteOnlyEntries(day);
-    if (noteOnly.length === 0) return null;
+  // Prominent corner indicator for days with a note but without any shift preset (memoized)
+  const renderCellCorner = useCallback(
+    (day: CalendarDay) => {
+      const noteOnly = getDayNoteOnlyEntries(day);
+      if (noteOnly.length === 0) return null;
 
-    return (
-      <View style={styles.cornerNoteContainer}>
-        {noteOnly.slice(0, 2).map((item, idx) => (
-          <View
-            key={`corner_note_${item.member.id}_${idx}`}
-            style={[
-              styles.cornerNoteBadge,
-              { backgroundColor: item.color || '#F59E0B' },
-            ]}
-          />
-        ))}
-        {noteOnly.length > 2 && (
-          <View style={[styles.cornerNoteBadge, { backgroundColor: '#64748B' }]} />
-        )}
-      </View>
-    );
-  };
-
-  // Render background for day cell (Step 7.4A - full_fill / 50-50 split)
-  const renderCellBg = (day: CalendarDay) => {
-    if (cellStyle !== 'full_fill') return null;
-    const dayShifts = getDayShifts(day);
-    if (dayShifts.length === 0) return null;
-
-    if (dayShifts.length === 1) {
-      const col = dayShifts[0].color;
       return (
-        <View
-          style={[
-            StyleSheet.absoluteFill,
-            {
-              backgroundColor: isDark ? `${col}40` : `${col}24`,
-              borderLeftWidth: 3.5,
-              borderLeftColor: col,
-            },
-          ]}
-        />
-      );
-    }
-
-    if (dayShifts.length === 2) {
-      // 50/50 split exactly as user requested: "půl na půl zabarvené"
-      const col1 = dayShifts[0].color;
-      const col2 = dayShifts[1].color;
-      return (
-        <View style={[StyleSheet.absoluteFill, { flexDirection: 'row' }]}>
-          <View
-            style={{
-              flex: 1,
-              backgroundColor: isDark ? `${col1}40` : `${col1}24`,
-              borderLeftWidth: 3,
-              borderLeftColor: col1,
-            }}
-          />
-          <View
-            style={{
-              width: 1,
-              backgroundColor: isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.08)',
-            }}
-          />
-          <View
-            style={{
-              flex: 1,
-              backgroundColor: isDark ? `${col2}40` : `${col2}24`,
-              borderRightWidth: 3,
-              borderRightColor: col2,
-            }}
-          />
+        <View style={styles.cornerNoteContainer}>
+          {noteOnly.slice(0, 2).map((item, idx) => (
+            <View
+              key={`corner_note_${item.member.id}_${idx}`}
+              style={[
+                styles.cornerNoteBadge,
+                { backgroundColor: item.color || '#F59E0B' },
+              ]}
+            />
+          ))}
+          {noteOnly.length > 2 && (
+            <View style={[styles.cornerNoteBadge, { backgroundColor: '#64748B' }]} />
+          )}
         </View>
       );
-    }
+    },
+    [getDayNoteOnlyEntries]
+  );
 
-    // 3 or more shifts: divided vertical columns
-    return (
-      <View style={[StyleSheet.absoluteFill, { flexDirection: 'row' }]}>
-        {dayShifts.slice(0, 3).map((item, idx) => (
+  // Render background for day cell (memoized full_fill / 50-50 split)
+  const renderCellBg = useCallback(
+    (day: CalendarDay) => {
+      if (cellStyle !== 'full_fill') return null;
+      const dayShifts = getDayShifts(day);
+      if (dayShifts.length === 0) return null;
+
+      if (dayShifts.length === 1) {
+        const col = dayShifts[0].color;
+        return (
           <View
-            key={`fill_${idx}`}
-            style={{
-              flex: 1,
-              backgroundColor: isDark ? `${item.color}40` : `${item.color}24`,
-              borderLeftWidth: idx === 0 ? 3 : 0,
-              borderLeftColor: item.color,
-            }}
+            style={[
+              StyleSheet.absoluteFill,
+              {
+                backgroundColor: isDark ? `${col}40` : `${col}24`,
+                borderLeftWidth: 3.5,
+                borderLeftColor: col,
+              },
+            ]}
           />
-        ))}
-      </View>
-    );
-  };
+        );
+      }
 
-  // Render shift items inside each calendar day cell (Step 5.3 & Step 7.4A)
-  const renderCellContent = (day: CalendarDay) => {
+      if (dayShifts.length === 2) {
+        // 50/50 split exactly as user requested: "půl na půl zabarvené"
+        const col1 = dayShifts[0].color;
+        const col2 = dayShifts[1].color;
+        return (
+          <View style={[StyleSheet.absoluteFill, { flexDirection: 'row' }]}>
+            <View
+              style={{
+                flex: 1,
+                backgroundColor: isDark ? `${col1}40` : `${col1}24`,
+                borderLeftWidth: 3,
+                borderLeftColor: col1,
+              }}
+            />
+            <View
+              style={{
+                width: 1,
+                backgroundColor: isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.08)',
+              }}
+            />
+            <View
+              style={{
+                flex: 1,
+                backgroundColor: isDark ? `${col2}40` : `${col2}24`,
+                borderRightWidth: 3,
+                borderRightColor: col2,
+              }}
+            />
+          </View>
+        );
+      }
+
+      // 3 or more shifts: divided vertical columns
+      return (
+        <View style={[StyleSheet.absoluteFill, { flexDirection: 'row' }]}>
+          {dayShifts.slice(0, 3).map((item, idx) => (
+            <View
+              key={`fill_${idx}`}
+              style={{
+                flex: 1,
+                backgroundColor: isDark ? `${item.color}40` : `${item.color}24`,
+                borderLeftWidth: idx === 0 ? 3 : 0,
+                borderLeftColor: item.color,
+              }}
+            />
+          ))}
+        </View>
+      );
+    },
+    [cellStyle, getDayShifts, isDark]
+  );
+
+  // Render shift items inside each calendar day cell (memoized)
+  const renderCellContent = useCallback(
+    (day: CalendarDay) => {
     const dayShifts = getDayShifts(day);
     if (dayShifts.length === 0) return null;
 
@@ -906,7 +929,7 @@ export default function CalendarScreen() {
         )}
       </View>
     );
-  };
+  }, [cellStyle, getDayShifts, isDark, calendarDensity, fontMultiplier, ui.textMuted]);
 
   const isDateSelected = useCallback(
     (dateStr: string) => {
