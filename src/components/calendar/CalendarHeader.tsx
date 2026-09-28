@@ -20,10 +20,13 @@ import {
   Check,
   CloudOff,
   Users,
+  Calendar as CalendarIcon,
+  List,
+  User,
 } from 'lucide-react-native';
 import { useShiftStore } from '@/store/useShiftStore';
 import { useAuthStore } from '@/store/useAuthStore';
-import { useSettingsStore } from '@/store/useSettingsStore';
+import { useSettingsStore, CalendarViewMode } from '@/store/useSettingsStore';
 
 const CZECH_MONTHS = [
   'Leden',
@@ -50,7 +53,7 @@ export default function CalendarHeader({ onSave, onAutoSaveMonth }: CalendarHead
   const isDark = useColorScheme() === 'dark';
 
   const { currentGroup, currentUser } = useAuthStore();
-  const { defaultEditMemberMode, calendarView } = useSettingsStore();
+  const { defaultEditMemberMode, calendarView, setCalendarView } = useSettingsStore();
   const {
     currentMonth,
     nextMonth,
@@ -235,6 +238,18 @@ export default function CalendarHeader({ onSave, onAutoSaveMonth }: CalendarHead
     setCurrentMonth(new Date());
   };
 
+  const handleSwitchView = async (newView: CalendarViewMode) => {
+    if (calendarView === newView) return;
+    if (isEditMode && hasPending) {
+      if (onAutoSaveMonth) {
+        await onAutoSaveMonth();
+      } else if (onSave) {
+        await onSave();
+      }
+    }
+    setCalendarView(newView);
+  };
+
   return (
     <View style={styles.container}>
       {/* Top Status & Quick Bar */}
@@ -308,6 +323,75 @@ export default function CalendarHeader({ onSave, onAutoSaveMonth }: CalendarHead
             </TouchableOpacity>
           </Animated.View>
         </View>
+      </View>
+
+      {/* View Mode Selector: Month | Week | Day */}
+      <View style={[styles.viewSelectorContainer, { backgroundColor: ui.card, borderColor: ui.border }]}>
+        <TouchableOpacity
+          style={[
+            styles.viewSelectorBtn,
+            calendarView === 'month' && [styles.viewSelectorBtnActive, { backgroundColor: isDark ? '#1E293B' : '#EFF6FF', borderColor: ui.accent }],
+          ]}
+          onPress={() => handleSwitchView('month')}
+          activeOpacity={0.75}
+        >
+          <CalendarIcon size={13} color={calendarView === 'month' ? ui.accent : ui.textMuted} />
+          <Text
+            style={[
+              styles.viewSelectorText,
+              {
+                color: calendarView === 'month' ? ui.accent : ui.textMuted,
+                fontWeight: calendarView === 'month' ? '700' : '500',
+              },
+            ]}
+          >
+            Měsíc
+          </Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[
+            styles.viewSelectorBtn,
+            calendarView === 'week' && [styles.viewSelectorBtnActive, { backgroundColor: isDark ? '#1E293B' : '#EFF6FF', borderColor: ui.accent }],
+          ]}
+          onPress={() => handleSwitchView('week')}
+          activeOpacity={0.75}
+        >
+          <List size={13} color={calendarView === 'week' ? ui.accent : ui.textMuted} />
+          <Text
+            style={[
+              styles.viewSelectorText,
+              {
+                color: calendarView === 'week' ? ui.accent : ui.textMuted,
+                fontWeight: calendarView === 'week' ? '700' : '500',
+              },
+            ]}
+          >
+            Týden
+          </Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[
+            styles.viewSelectorBtn,
+            calendarView === 'day' && [styles.viewSelectorBtnActive, { backgroundColor: isDark ? '#1E293B' : '#EFF6FF', borderColor: ui.accent }],
+          ]}
+          onPress={() => handleSwitchView('day')}
+          activeOpacity={0.75}
+        >
+          <User size={13} color={calendarView === 'day' ? ui.accent : ui.textMuted} />
+          <Text
+            style={[
+              styles.viewSelectorText,
+              {
+                color: calendarView === 'day' ? ui.accent : ui.textMuted,
+                fontWeight: calendarView === 'day' ? '700' : '500',
+              },
+            ]}
+          >
+            Den
+          </Text>
+        </TouchableOpacity>
       </View>
 
       {/* Month Navigator Pill Card (Shown only in Month view; Day and Week views have their own navigation) */}
@@ -498,5 +582,36 @@ const styles = StyleSheet.create({
   todayButtonText: {
     fontSize: 11.5,
     fontWeight: '700',
+  },
+  viewSelectorContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 3,
+    borderRadius: 14,
+    borderWidth: 1,
+    gap: 4,
+  },
+  viewSelectorBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 7,
+    paddingHorizontal: 8,
+    borderRadius: 10,
+    gap: 6,
+    borderWidth: 1,
+    borderColor: 'transparent',
+  },
+  viewSelectorBtnActive: {
+    borderWidth: 1,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.08,
+    shadowRadius: 2,
+    elevation: 1,
+  },
+  viewSelectorText: {
+    fontSize: 12.5,
   },
 });
