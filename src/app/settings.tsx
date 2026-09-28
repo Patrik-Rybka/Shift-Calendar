@@ -63,13 +63,9 @@ import {
   ShieldAlert,
 } from 'lucide-react-native';
 
-import { UpdateModal } from '@/components/common/UpdateModal';
+import * as Updates from 'expo-updates';
 import DiagnosticModal from '@/components/admin/DiagnosticModal';
-import {
-  checkForUpdate,
-  getCurrentAppVersion,
-  ReleaseInfo,
-} from '@/services/updateService';
+import { getCurrentAppVersion } from '@/services/updateService';
 import { shareGroupInvite } from '@/utils/shareUtils';
 
 import { useAuthStore } from '@/store/useAuthStore';
@@ -257,8 +253,6 @@ export default function SettingsScreen() {
   // ─── Section 7.4F / 8.1: Account & App ─────────────────────────────────────────────
   const [checkingUpdate, setCheckingUpdate] = useState(false);
   const [leavingGroup, setLeavingGroup] = useState(false);
-  const [updateModalVisible, setUpdateModalVisible] = useState(false);
-  const [availableRelease, setAvailableRelease] = useState<ReleaseInfo | null>(null);
 
   // ─── Effects ─────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -591,21 +585,35 @@ export default function SettingsScreen() {
   const handleCheckUpdate = async () => {
     setCheckingUpdate(true);
     try {
-      const result = await checkForUpdate();
-      if (result.hasUpdate && result.release) {
-        setAvailableRelease(result.release);
-        setUpdateModalVisible(true);
-      } else if (result.error) {
-        Alert.alert('Kontrola aktualizací', result.error);
+      if (!Updates.isEnabled) {
+        Alert.alert(
+          'Aplikace je aktuální',
+           `Máte nainstalovanou verzi Kalendáře směn (v${getCurrentAppVersion()}). V režimu vývoje jsou aktualizace řízeny přes Expo.`,
+          [{ text: 'Rozumím', style: 'default' }]
+        );
+        return;
+      }
+
+      const check = await Updates.checkForUpdateAsync();
+      if (check.isAvailable) {
+        await Updates.fetchUpdateAsync();
+        Alert.alert(
+          'Nová aktualizace stažena!',
+          'Nová verze byla úspěšně stažena na pozadí. Pro její aktivaci stačí aplikaci restartovat.',
+          [
+            { text: 'Restartovat nyní', onPress: () => Updates.reloadAsync() },
+            { text: 'Později', style: 'cancel' },
+          ]
+        );
       } else {
         Alert.alert(
           'Aplikace je aktuální',
-          result.message || `Máte nainstalovanou nejnovější verzi Kalendáře směn (v${getCurrentAppVersion()}).`,
+          `Máte nainstalovanou nejnovější verzi Kalendáře směn (v${getCurrentAppVersion()}). Žádné nové aktualizace nejsou k dispozici.`,
           [{ text: 'Rozumím', style: 'default' }]
         );
       }
     } catch {
-      Alert.alert('Chyba', 'Nepodařilo se ověřit aktualizace. Zkontrolujte připojení k internetu.');
+      Alert.alert('Kontrola aktualizací', 'Nepodařilo se ověřit aktualizace. Zkontrolujte připojení k internetu.');
     } finally {
       setCheckingUpdate(false);
     }
@@ -2667,15 +2675,7 @@ export default function SettingsScreen() {
         </KeyboardAvoidingView>
       </Modal>
 
-      {/* ═════════════════════════════════════════════════════════════════
-           MODAL 8.1 — GitHub Autoupdater
-      ═════════════════════════════════════════════════════════════════ */}
-      <UpdateModal
-        visible={updateModalVisible}
-        release={availableRelease}
-        currentVersion={getCurrentAppVersion()}
-        onClose={() => setUpdateModalVisible(false)}
-      />
+
 
       {/* ═════════════════════════════════════════════════════════════════
            MODAL 8.2 — Administrátorská diagnostická konzole
