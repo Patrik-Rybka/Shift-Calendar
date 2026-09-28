@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -142,24 +142,77 @@ export default function CalendarScreen() {
     }
   }, []);
 
-  // Load presets & sync initial shifts
+  const isFirstMountRef = useRef(true);
+
+  // Load presets & sync shifts (with 350ms debounce on month switching to prevent rapid click spam)
   useEffect(() => {
     if (!currentGroup?.id) return;
 
-    const initData = async () => {
+    let isMounted = true;
+
+    const doSync = async () => {
       try {
         if (presets.length === 0) {
           const loadedPresets = await getGroupPresets(currentGroup.id);
-          setPresets(loadedPresets);
+          if (isMounted) setPresets(loadedPresets);
         }
         await syncWithNeon(currentGroup.id);
       } catch (e) {
-        console.warn('Initial calendar sync error:', e);
+        console.warn('Calendar sync notice:', e);
       }
     };
 
-    initData();
+    // First mount runs immediately so user sees their shifts without delay
+    if (isFirstMountRef.current) {
+      isFirstMountRef.current = false;
+      doSync();
+      return;
+    }
+
+    // Subsequent month jumps are debounced by 350ms to let user swipe/click smoothly without Neon connection spam
+    const timer = setTimeout(() => {
+      if (isMounted) {
+        doSync();
+      }
+    }, 350);
+
+    return () => {
+      isMounted = false;
+      clearTimeout(timer);
+    };
   }, [currentGroup?.id, currentMonth]);
+
+  // Step 6.2: Quiet auto-reconnect when offline (~45s calm timer, foreground only)
+  useEffect(() => {
+    if (syncStatus !== 'offline' || !currentGroup?.id) return;
+
+    let retryCount = 0;
+    const maxQuietRetries = 3;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    const scheduleQuietReconnect = () => {
+      if (retryCount >= maxQuietRetries) {
+        return;
+      }
+
+      timer = setTimeout(async () => {
+        // Battery protection: only attempt when user has the app actively open on display
+        if (AppState.currentState !== 'active') return;
+
+        retryCount += 1;
+        const ok = await syncWithNeon(currentGroup.id);
+        if (!ok && useShiftStore.getState().syncStatus === 'offline') {
+          scheduleQuietReconnect();
+        }
+      }, 45000); // 45 seconds quiet reconnect interval
+    };
+
+    scheduleQuietReconnect();
+
+    return () => {
+      if (timer) clearTimeout(timer);
+    };
+  }, [syncStatus, currentGroup?.id]);
 
   // Auto-sync whenever user returns to the app from background or minimizes app
   useEffect(() => {

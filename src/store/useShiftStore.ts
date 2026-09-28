@@ -92,6 +92,9 @@ export interface ShiftState {
   syncWithNeon: (groupId: string) => Promise<boolean>;
 }
 
+let activeSyncPromise: Promise<boolean> | null = null;
+let latestSyncRequestId = 0;
+
 export const useShiftStore = create<ShiftState>()(
   persist(
     (set, get) => ({
@@ -262,64 +265,105 @@ export const useShiftStore = create<ShiftState>()(
       },
 
       syncWithNeon: async (groupId: string): Promise<boolean> => {
-        const { pendingChanges, currentMonth } = get();
-        set({ syncStatus: 'syncing' });
+        const currentRequestId = ++latestSyncRequestId;
 
-        try {
-          // 1. Flush pending local changes to Neon
-          const pendingList = Object.values(pendingChanges);
-          const upserts = pendingList
-            .filter((p) => p.action === 'upsert')
-            .map((p) => p.shift);
-          const deletes: ShiftDeleteTarget[] = pendingList
-            .filter((p) => p.action === 'delete')
-            .map((p) => ({
-              groupId: p.shift.group_id,
-              userId: p.shift.user_id,
-              date: typeof p.shift.date === 'string' ? p.shift.date.split('T')[0] : p.shift.date,
-              presetId: p.shift.shift_preset_id,
-            }));
-
-          if (upserts.length > 0 || deletes.length > 0) {
-            logger.info('SYNC', `Odesílám lokální změny: ${upserts.length} uložení, ${deletes.length} smazání.`);
+        // If another sync is actively running, wait for it to finish to prevent Neon connection thrashing
+        if (activeSyncPromise) {
+          try {
+            await activeSyncPromise;
+          } catch {
+            // Ignore previous errors
           }
-
-          if (upserts.length > 0) {
-            const ok = await batchUpsertShifts(upserts);
-            if (!ok) throw new Error('Batch upsert failed');
-          }
-
-          if (deletes.length > 0) {
-            const ok = await batchDeleteShifts(deletes);
-            if (!ok) throw new Error('Batch delete failed');
-          }
-
-          // Clear flushed changes
-          set({ pendingChanges: {} });
-
-          // 2. Fetch fresh shifts for visible month (with 7 days padding before and after)
-          const rawM = currentMonth;
-          const safeM = rawM instanceof Date && !isNaN(rawM.getTime()) ? rawM : new Date();
-          const year = safeM.getFullYear();
-          const month = safeM.getMonth(); // 0-indexed
-          const startDate = formatLocalDate(year, month - 1, 20);
-          const endDate = formatLocalDate(year, month + 2, 10);
-
-          const remoteShifts = await fetchGroupShiftsRange(groupId, startDate, endDate);
-          get().setShifts(remoteShifts, startDate, endDate);
-
-          const now = new Date().toISOString();
-          set({
-            syncStatus: 'synced',
-            lastSyncedAt: now,
-          });
-          logger.success('SYNC', `Synchronizováno ${remoteShifts.length} směn s Neon DB.`);
-          return true;
-        } catch (error) {
-          logger.warn('SYNC', 'Synchronizace selhala (offline režim)', error);
-          set({ syncStatus: 'offline' });
-          return false;
         }
+
+        // If a newer sync request was initiated while waiting, yield to that request
+        if (currentRequestId !== latestSyncRequestId) {
+          return true;
+        }
+
+        const runSync = async (): Promise<boolean> => {
+          const { pendingChanges } = get();
+          set({ syncStatus: 'syncing' });
+
+          try {
+            // 1. Flush pending local changes to Neon
+            const pendingList = Object.values(pendingChanges);
+            const upserts = pendingList
+              .filter((p) => p.action === 'upsert')
+              .map((p) => p.shift);
+            const deletes: ShiftDeleteTarget[] = pendingList
+              .filter((p) => p.action === 'delete')
+              .map((p) => ({
+                groupId: p.shift.group_id,
+                userId: p.shift.user_id,
+                date: typeof p.shift.date === 'string' ? p.shift.date.split('T')[0] : p.shift.date,
+                presetId: p.shift.shift_preset_id,
+              }));
+
+            if (upserts.length > 0 || deletes.length > 0) {
+              logger.info('SYNC', `Odesílám lokální změny: ${upserts.length} uložení, ${deletes.length} smazání.`);
+            }
+
+            if (upserts.length > 0) {
+              const ok = await batchUpsertShifts(upserts);
+              if (!ok) throw new Error('Batch upsert failed');
+            }
+
+            if (deletes.length > 0) {
+              const ok = await batchDeleteShifts(deletes);
+              if (!ok) throw new Error('Batch delete failed');
+            }
+
+            // Clear flushed changes
+            set({ pendingChanges: {} });
+
+            // If a newer request was queued while flushing, yield without overwriting month data
+            if (currentRequestId !== latestSyncRequestId) {
+              return true;
+            }
+
+            // 2. Fetch fresh shifts for CURRENT visible month (always read fresh from get())
+            const rawM = get().currentMonth;
+            const safeM = rawM instanceof Date && !isNaN(rawM.getTime()) ? rawM : new Date();
+            const year = safeM.getFullYear();
+            const month = safeM.getMonth(); // 0-indexed
+            const startDate = formatLocalDate(year, month - 1, 20);
+            const endDate = formatLocalDate(year, month + 2, 10);
+
+            const remoteShifts = await fetchGroupShiftsRange(groupId, startDate, endDate);
+
+            // Guard against stale responses: only update if this is still the latest request
+            if (currentRequestId !== latestSyncRequestId) {
+              return true;
+            }
+
+            get().setShifts(remoteShifts, startDate, endDate);
+
+            const now = new Date().toISOString();
+            set({
+              syncStatus: 'synced',
+              lastSyncedAt: now,
+            });
+            logger.success('SYNC', `Synchronizováno ${remoteShifts.length} směn s Neon DB.`);
+            return true;
+          } catch (error) {
+            // If superseded by a newer month request, do NOT mark as offline!
+            if (currentRequestId !== latestSyncRequestId) {
+              return false;
+            }
+            logger.warn('SYNC', 'Synchronizace selhala (offline režim)', error);
+            set({ syncStatus: 'offline' });
+            return false;
+          } finally {
+            if (activeSyncPromise === currentExecution) {
+              activeSyncPromise = null;
+            }
+          }
+        };
+
+        const currentExecution = runSync();
+        activeSyncPromise = currentExecution;
+        return currentExecution;
       },
     }),
     {
