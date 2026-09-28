@@ -314,8 +314,18 @@ export const useShiftStore = create<ShiftState>()(
               if (!ok) throw new Error('Batch delete failed');
             }
 
-            // Clear flushed changes
-            set({ pendingChanges: {} });
+            // Atomically clear only the successfully flushed changes
+            set((state) => {
+              const nextPending = { ...state.pendingChanges };
+              for (const item of pendingList) {
+                const dateStr = typeof item.shift.date === 'string' ? item.shift.date.split('T')[0] : item.shift.date;
+                const key = getShiftMapKey(item.shift.user_id, dateStr, item.shift.shift_preset_id);
+                if (nextPending[key] && nextPending[key].timestamp <= item.timestamp) {
+                  delete nextPending[key];
+                }
+              }
+              return { pendingChanges: nextPending };
+            });
 
             // If a newer request was queued while flushing, yield without overwriting month data
             if (currentRequestId !== latestSyncRequestId) {

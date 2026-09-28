@@ -107,6 +107,13 @@ export default function CalendarScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [selectedDayDetail, setSelectedDayDetail] = useState<CalendarDay | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  const showToast = useCallback((msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => {
+      setToastMessage((cur) => (cur === msg ? null : cur));
+    }, 2800);
+  }, []);
   const [pickerVisible, setPickerVisible] = useState(false);
   const [selectedRange, setSelectedRange] = useState<{ start: string; end: string } | null>(null);
   const [confettiVisible, setConfettiVisible] = useState(false);
@@ -182,7 +189,7 @@ export default function CalendarScreen() {
     };
   }, [currentGroup?.id, currentMonth]);
 
-  // Step 6.2: Quiet auto-reconnect when offline (~45s calm timer, foreground only)
+  // Step 6.2 & 6.3: Quiet auto-reconnect when offline (~45s calm timer, foreground only) + auto-flush
   useEffect(() => {
     if (syncStatus !== 'offline' || !currentGroup?.id) return;
 
@@ -200,8 +207,13 @@ export default function CalendarScreen() {
         if (AppState.currentState !== 'active') return;
 
         retryCount += 1;
+        const pendingCount = Object.keys(useShiftStore.getState().pendingChanges).length;
         const ok = await syncWithNeon(currentGroup.id);
-        if (!ok && useShiftStore.getState().syncStatus === 'offline') {
+        if (ok) {
+          if (pendingCount > 0) {
+            showToast(`✓ Offline změny (${pendingCount}) automaticky odeslány do cloudu`);
+          }
+        } else if (useShiftStore.getState().syncStatus === 'offline') {
           scheduleQuietReconnect();
         }
       }, 45000); // 45 seconds quiet reconnect interval
@@ -212,7 +224,29 @@ export default function CalendarScreen() {
     return () => {
       if (timer) clearTimeout(timer);
     };
-  }, [syncStatus, currentGroup?.id]);
+  }, [syncStatus, currentGroup?.id, syncWithNeon, showToast]);
+
+  // Step 6.3: Auto-flush pending changes when connection is restored/online and user is not editing
+  useEffect(() => {
+    const pendingCount = Object.keys(pendingChanges).length;
+    if (pendingCount === 0 || isEditMode || syncStatus === 'offline' || syncStatus === 'syncing' || !currentGroup?.id) {
+      return;
+    }
+
+    const flushTimer = setTimeout(async () => {
+      if (AppState.currentState !== 'active') return;
+      try {
+        const ok = await syncWithNeon(currentGroup.id);
+        if (ok) {
+          showToast(`✓ ${pendingCount} změn automaticky odesláno do cloudu`);
+        }
+      } catch (e) {
+        console.warn('Auto-flush notice:', e);
+      }
+    }, 1500);
+
+    return () => clearTimeout(flushTimer);
+  }, [pendingChanges, isEditMode, syncStatus, currentGroup?.id, syncWithNeon, showToast]);
 
   // Auto-sync whenever user returns to the app from background or minimizes app
   useEffect(() => {
@@ -220,9 +254,16 @@ export default function CalendarScreen() {
 
     const subscription = AppState.addEventListener('change', (nextState) => {
       if (nextState === 'active') {
-        syncWithNeon(currentGroup.id).catch((e) => {
-          console.warn('Background foreground sync notice:', e);
-        });
+        const pendingCount = Object.keys(useShiftStore.getState().pendingChanges).length;
+        syncWithNeon(currentGroup.id)
+          .then((ok) => {
+            if (ok && pendingCount > 0) {
+              showToast(`✓ Offline změny (${pendingCount}) automaticky odeslány do cloudu`);
+            }
+          })
+          .catch((e) => {
+            console.warn('Background foreground sync notice:', e);
+          });
       } else if (nextState === 'background' || nextState === 'inactive') {
         const hasPending = Object.keys(useShiftStore.getState().pendingChanges).length > 0;
         if (hasPending) {
@@ -236,7 +277,7 @@ export default function CalendarScreen() {
     return () => {
       subscription.remove();
     };
-  }, [currentGroup?.id, syncWithNeon]);
+  }, [currentGroup?.id, syncWithNeon, showToast]);
 
   // Pull to refresh
   const onRefresh = useCallback(async () => {
@@ -887,13 +928,6 @@ export default function CalendarScreen() {
     },
     [setRangeStart, setRangeEnd, editingUserId, currentUser?.id, groupMembers, shifts]
   );
-
-  const showToast = useCallback((msg: string) => {
-    setToastMessage(msg);
-    setTimeout(() => {
-      setToastMessage((cur) => (cur === msg ? null : cur));
-    }, 2800);
-  }, []);
 
   const handleApplyPresetFromModal = useCallback(
     (presetId: string | null, note?: string | null) => {
