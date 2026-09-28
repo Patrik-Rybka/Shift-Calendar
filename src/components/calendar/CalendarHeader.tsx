@@ -442,26 +442,26 @@ const styles = StyleSheet.create({
   syncBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 5,
-    paddingHorizontal: 9,
-    paddingVertical: 6,
+    gap: 7,
+    height: 38,
+    paddingHorizontal: 14,
     borderRadius: 12,
     borderWidth: 1,
     flexShrink: 0,
   },
   statusDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
+    width: 7,
+    height: 7,
+    borderRadius: 3.5,
   },
   syncText: {
-    fontSize: 12,
+    fontSize: 12.5,
     fontWeight: '700',
   },
   actionsRight: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 8,
     flexShrink: 0,
   },
   iconButton: {
@@ -475,8 +475,8 @@ const styles = StyleSheet.create({
   editButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 14,
+    gap: 7,
+    paddingHorizontal: 18,
     height: 38,
     borderRadius: 12,
     shadowColor: '#3B82F6',
@@ -487,7 +487,7 @@ const styles = StyleSheet.create({
   },
   editButtonText: {
     color: '#FFFFFF',
-    fontSize: 13.5,
+    fontSize: 14,
     fontWeight: '700',
   },
   editButtonPending: {
