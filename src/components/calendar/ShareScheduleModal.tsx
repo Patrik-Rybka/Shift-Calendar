@@ -14,14 +14,10 @@ import {
   X,
   Share2,
   Calendar,
-  Users,
-  User,
   FileText,
   Check,
   CalendarDays,
   Camera,
-  CheckSquare,
-  Square,
 } from 'lucide-react-native';
 import { useAuthStore } from '@/store/useAuthStore';
 

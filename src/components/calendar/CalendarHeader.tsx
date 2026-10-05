@@ -16,7 +16,6 @@ import {
   Save,
   Settings,
   CloudOff,
-  Users,
   Calendar as CalendarIcon,
   List,
   User,

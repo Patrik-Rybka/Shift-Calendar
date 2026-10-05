@@ -2,10 +2,8 @@ import React, { forwardRef } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import {
   Calendar,
-  Clock,
   FileText,
   Users,
-  CalendarDays,
 } from 'lucide-react-native';
 import { useAuthStore } from '@/store/useAuthStore';
 import { useShiftStore, getUserShiftsForDay } from '@/store/useShiftStore';

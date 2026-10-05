@@ -17,15 +17,12 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import {
   Calendar as CalendarIcon,
-  Clock,
   X,
   Users,
-  AlertCircle,
   Crown,
   FileText,
   UserPlus,
   Pencil,
-  Eye,
   EyeOff,
   Trash2,
   Camera,
