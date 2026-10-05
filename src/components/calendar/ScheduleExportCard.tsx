@@ -11,6 +11,7 @@ import { useAuthStore } from '@/store/useAuthStore';
 import { useShiftStore, getUserShiftsForDay } from '@/store/useShiftStore';
 import { getCzechHoliday, formatLocalDate, generateMonthDays, CalendarDay } from '@/utils/calendarUtils';
 import type { ShareConfig, ShareRangeType } from './ShareScheduleModal';
+import type { DbShift, DbShiftPreset } from '@/services/db/neonClient';
 
 export interface ScheduleExportCardProps {
   config: ShareConfig;
@@ -63,6 +64,7 @@ interface ExportDayItem {
   dateStr: string;
   dayNumber: number;
   dayOfWeekName: string;
+  dayOfWeekLong: string;
   fullCzechDate: string;
   isWeekend: boolean;
   holidayName: string | null;
@@ -90,6 +92,7 @@ function computeWeekDays(rangeType: 'current_week' | 'next_week', baseDate: Date
       dateStr,
       dayNumber: dayNum,
       dayOfWeekName: CZECH_DAYS_LONG[d.getDay()],
+      dayOfWeekLong: CZECH_DAYS_LONG[d.getDay()],
       fullCzechDate: `${dayNum}. ${CZECH_MONTHS_GENITIVE[m]} ${y}`,
       isWeekend,
       holidayName: getCzechHoliday(dateStr),
@@ -127,7 +130,7 @@ export const ScheduleExportCard = forwardRef<View, ScheduleExportCardProps>(
     const isMonthView = config.rangeType === 'current_month';
 
     // -------------------------------------------------------------
-    // 1. MONTH VIEW (CALENDAR POSTER WITH NOTES UNDER TABLE)
+    // 1. MONTH VIEW (CALENDAR POSTER WITH GROUPED NOTES & SHARED EVENTS)
     // -------------------------------------------------------------
     if (isMonthView) {
       const safe = currentDate instanceof Date && !isNaN(currentDate.getTime()) ? currentDate : new Date();
@@ -146,7 +149,7 @@ export const ScheduleExportCard = forwardRef<View, ScheduleExportCardProps>(
       const monthNotesList: {
         dateStr: string;
         dayNumber: number;
-        dayOfWeekName: string;
+        dayOfWeekLong: string;
         member: (typeof activeMembers)[0];
         note: string;
       }[] = [];
@@ -154,6 +157,10 @@ export const ScheduleExportCard = forwardRef<View, ScheduleExportCardProps>(
       if (config.includeNotes) {
         for (const cell of monthDays) {
           if (!cell.isCurrentMonth) continue;
+          const [cY, cM, cD] = cell.dateStr.split('-').map(Number);
+          const cellDate = new Date(cY, cM - 1, cD, 12, 0, 0);
+          const dayOfWeekLong = CZECH_DAYS_LONG[cellDate.getDay()];
+
           for (const m of activeMembers) {
             const mShifts = getUserShiftsForDay(shifts, m.id, cell.dateStr);
             for (const s of mShifts) {
@@ -161,7 +168,7 @@ export const ScheduleExportCard = forwardRef<View, ScheduleExportCardProps>(
                 monthNotesList.push({
                   dateStr: cell.dateStr,
                   dayNumber: cell.dayNumber,
-                  dayOfWeekName: CZECH_DAYS_SHORT[cell.dayOfWeek],
+                  dayOfWeekLong,
                   member: m,
                   note: s.note.trim(),
                 });
@@ -170,6 +177,14 @@ export const ScheduleExportCard = forwardRef<View, ScheduleExportCardProps>(
           }
         }
       }
+
+      // Group notes by member so they are clear and separate
+      const notesByMember = activeMembers
+        .map((member) => ({
+          member,
+          notes: monthNotesList.filter((n) => n.member.id === member.id),
+        }))
+        .filter((g) => g.notes.length > 0);
 
       return (
         <View ref={ref} style={styles.monthCardContainer} collapsable={false}>
@@ -250,23 +265,40 @@ export const ScheduleExportCard = forwardRef<View, ScheduleExportCardProps>(
             {weekRows.map((week, wIdx) => (
               <View key={`week_${wIdx}`} style={styles.monthWeekRow}>
                 {week.map((cell) => {
-                  const dayShiftsByMember = activeMembers.map((m) => {
-                    const shiftsForDay = getUserShiftsForDay(shifts, m.id, cell.dateStr).filter((s) => {
+                  // Collect shifts for active members on this cell
+                  const memberShiftsMap: Array<{
+                    member: (typeof activeMembers)[0];
+                    shifts: Array<{ shift: DbShift; preset: DbShiftPreset | null }>;
+                  }> = [];
+
+                  // Map presetId -> members who have this preset
+                  const presetMemberCount: Record<string, number> = {};
+
+                  for (const m of activeMembers) {
+                    const rawShifts = getUserShiftsForDay(shifts, m.id, cell.dateStr).filter((s) => {
                       if (!config.includeNotes && !s.shift_preset_id) return false;
                       return true;
                     });
-                    return {
-                      member: m,
-                      shifts: shiftsForDay.map((s) => ({
-                        shift: s,
-                        preset: s.shift_preset_id
-                          ? presets.find((p) => p.id === s.shift_preset_id)
-                          : null,
-                      })),
-                    };
-                  });
+                    const parsed = rawShifts.map((s) => ({
+                      shift: s,
+                      preset: s.shift_preset_id ? presets.find((p) => p.id === s.shift_preset_id) || null : null,
+                    }));
+                    memberShiftsMap.push({ member: m, shifts: parsed });
 
-                  const hasAnyShifts = dayShiftsByMember.some((item) => item.shifts.length > 0);
+                    for (const item of parsed) {
+                      if (item.preset) {
+                        presetMemberCount[item.preset.id] = (presetMemberCount[item.preset.id] || 0) + 1;
+                      }
+                    }
+                  }
+
+                  // Detect shared family events: all active members have the same preset (when 2+ members selected)
+                  const sharedPresetIds = Object.keys(presetMemberCount).filter(
+                    (pId) => activeMembers.length >= 2 && presetMemberCount[pId] === activeMembers.length
+                  );
+
+                  const hasSharedEvents = sharedPresetIds.length > 0;
+                  const hasAnyShifts = memberShiftsMap.some((item) => item.shifts.length > 0);
 
                   return (
                     <View
@@ -301,40 +333,72 @@ export const ScheduleExportCard = forwardRef<View, ScheduleExportCardProps>(
                       {/* Shifts in this Day Cell */}
                       <View style={styles.monthCellShiftsArea}>
                         {cell.isCurrentMonth && hasAnyShifts && (
-                          dayShiftsByMember.map(({ member, shifts: mShifts }) => {
-                            if (mShifts.length === 0) return null;
-                            return mShifts.map(({ shift, preset }, sIdx) => {
-                              const badgeColor = preset?.color || member.color || '#38BDF8';
-                              return (
-                                <View
-                                  key={`ms_${member.id}_${sIdx}`}
-                                  style={[
-                                    styles.monthShiftMiniBadge,
-                                    { backgroundColor: `${badgeColor}25`, borderColor: badgeColor },
-                                  ]}
-                                >
-                                  {!isSingleMember && (
-                                    <View
-                                      style={[
-                                        styles.memberMiniDot,
-                                        { backgroundColor: member.color || '#38BDF8' },
-                                      ]}
-                                    />
-                                  )}
-                                  <Text
-                                    style={[styles.monthShiftMiniText, { color: badgeColor }]}
-                                    numberOfLines={1}
+                          <>
+                            {/* 1. Shared Family Events (rendered ONCE with Users icon instead of 4 duplicates!) */}
+                            {hasSharedEvents &&
+                              sharedPresetIds.map((pId) => {
+                                const preset = presets.find((p) => p.id === pId);
+                                const pColor = preset?.color || '#8B5CF6';
+                                return (
+                                  <View
+                                    key={`shared_${pId}`}
+                                    style={[
+                                      styles.monthSharedBadge,
+                                      { backgroundColor: `${pColor}30`, borderColor: pColor },
+                                    ]}
                                   >
-                                    {!isSingleMember ? `${member.display_name.charAt(0)}: ` : ''}
-                                    {preset?.title || (shift.note ? 'Pozn.' : 'Směna')}
-                                  </Text>
-                                  {config.includeNotes && shift.note && (
-                                    <FileText size={8} color="#F59E0B" style={{ marginLeft: 1 }} />
-                                  )}
-                                </View>
+                                    <Users size={8.5} color={pColor} style={{ marginRight: 2 }} />
+                                    <Text
+                                      style={[styles.monthSharedText, { color: pColor }]}
+                                      numberOfLines={1}
+                                    >
+                                      {preset?.title}
+                                    </Text>
+                                  </View>
+                                );
+                              })}
+
+                            {/* 2. Individual Shifts (excluding already shown shared events) */}
+                            {memberShiftsMap.map(({ member, shifts: mShifts }) => {
+                              const remainingShifts = mShifts.filter(
+                                (item) => !item.preset || !sharedPresetIds.includes(item.preset.id)
                               );
-                            });
-                          })
+
+                              if (remainingShifts.length === 0) return null;
+
+                              return remainingShifts.map(({ shift, preset }, sIdx) => {
+                                const badgeColor = preset?.color || member.color || '#38BDF8';
+                                return (
+                                  <View
+                                    key={`ms_${member.id}_${sIdx}`}
+                                    style={[
+                                      styles.monthShiftMiniBadge,
+                                      { backgroundColor: `${badgeColor}25`, borderColor: badgeColor },
+                                    ]}
+                                  >
+                                    {!isSingleMember && (
+                                      <View
+                                        style={[
+                                          styles.memberMiniDot,
+                                          { backgroundColor: member.color || '#38BDF8' },
+                                        ]}
+                                      />
+                                    )}
+                                    <Text
+                                      style={[styles.monthShiftMiniText, { color: badgeColor }]}
+                                      numberOfLines={1}
+                                    >
+                                      {!isSingleMember ? `${member.display_name.charAt(0)}: ` : ''}
+                                      {preset?.title || (shift.note ? 'Pozn.' : 'Směna')}
+                                    </Text>
+                                    {config.includeNotes && shift.note && (
+                                      <FileText size={8} color="#F59E0B" style={{ marginLeft: 1 }} />
+                                    )}
+                                  </View>
+                                );
+                              });
+                            })}
+                          </>
                         )}
                       </View>
                     </View>
@@ -344,38 +408,43 @@ export const ScheduleExportCard = forwardRef<View, ScheduleExportCardProps>(
             ))}
           </View>
 
-          {/* Month Notes Section (Placed UNDER table so it's 100% readable and grid stays clean!) */}
-          {config.includeNotes && monthNotesList.length > 0 && (
+          {/* Month Notes Section: Grouped neatly BY MEMBER, with "12. pondělí" format */}
+          {config.includeNotes && notesByMember.length > 0 && (
             <View style={styles.monthNotesSection}>
               <View style={styles.monthNotesHeader}>
-                <FileText size={15} color="#F59E0B" />
-                <Text style={styles.monthNotesTitle}>
+                <FileText size={16} color="#F59E0B" />
+                <Text style={styles.monthNotesMainTitle}>
                   POZNÁMKY K MĚSÍCI ({monthNotesList.length})
                 </Text>
               </View>
 
-              <View style={styles.monthNotesGrid}>
-                {monthNotesList.map((item, idx) => (
-                  <View key={`mnote_${idx}`} style={styles.monthNoteCard}>
-                    <View style={styles.monthNoteDateRow}>
-                      <Text style={styles.monthNoteDateText}>
-                        {item.dayNumber}. {item.dayOfWeekName}
+              <View style={styles.monthNotesGroupContainer}>
+                {notesByMember.map(({ member, notes: mNotes }) => (
+                  <View key={`ngroup_${member.id}`} style={styles.monthMemberGroupCard}>
+                    {/* Member Group Header */}
+                    <View style={styles.monthMemberGroupHeader}>
+                      <View style={[styles.memberMiniDotLarge, { backgroundColor: member.color || '#38BDF8' }]} />
+                      <Text style={[styles.monthMemberGroupName, { color: member.color || '#38BDF8' }]}>
+                        {member.display_name}
                       </Text>
-                      {!isSingleMember && (
-                        <View style={styles.monthNoteMemberTag}>
-                          <View
-                            style={[
-                              styles.memberMiniDot,
-                              { backgroundColor: item.member.color || '#38BDF8' },
-                            ]}
-                          />
-                          <Text style={styles.monthNoteMemberName}>
-                            {item.member.display_name}
-                          </Text>
-                        </View>
-                      )}
+                      <Text style={styles.monthMemberGroupCount}>
+                        ({mNotes.length} {mNotes.length === 1 ? 'poznámka' : mNotes.length < 5 ? 'poznámky' : 'poznámek'})
+                      </Text>
                     </View>
-                    <Text style={styles.monthNoteContentText}>{item.note}</Text>
+
+                    {/* Member Notes List */}
+                    <View style={styles.memberNotesList}>
+                      {mNotes.map((item, idx) => (
+                        <View key={`mn_${idx}`} style={styles.memberNoteItemRow}>
+                          <View style={styles.memberNoteDateBadge}>
+                            <Text style={styles.memberNoteDateText}>
+                              {item.dayNumber}. {item.dayOfWeekLong.toLowerCase()}
+                            </Text>
+                          </View>
+                          <Text style={styles.memberNoteText}>{item.note}</Text>
+                        </View>
+                      ))}
+                    </View>
                   </View>
                 ))}
               </View>
@@ -459,6 +528,34 @@ export const ScheduleExportCard = forwardRef<View, ScheduleExportCardProps>(
         {/* Days List */}
         <View style={styles.daysList}>
           {days.map((day) => {
+            // Check for shared family events on this day
+            const dayMemberShifts = activeMembers.map((m) => {
+              const rawShifts = getUserShiftsForDay(shifts, m.id, day.dateStr).filter((s) => {
+                if (!config.includeNotes && !s.shift_preset_id) return false;
+                return true;
+              });
+              return {
+                member: m,
+                shifts: rawShifts.map((s) => ({
+                  shift: s,
+                  preset: s.shift_preset_id ? presets.find((p) => p.id === s.shift_preset_id) || null : null,
+                })),
+              };
+            });
+
+            const presetCount: Record<string, number> = {};
+            for (const { shifts: mShifts } of dayMemberShifts) {
+              for (const { preset } of mShifts) {
+                if (preset) {
+                  presetCount[preset.id] = (presetCount[preset.id] || 0) + 1;
+                }
+              }
+            }
+
+            const sharedPresetIds = Object.keys(presetCount).filter(
+              (pId) => activeMembers.length >= 2 && presetCount[pId] === activeMembers.length
+            );
+
             return (
               <View
                 key={day.dateStr}
@@ -494,20 +591,38 @@ export const ScheduleExportCard = forwardRef<View, ScheduleExportCardProps>(
 
                 {/* Right Shifts Column */}
                 <View style={styles.shiftsCol}>
-                  {activeMembers.map((member) => {
-                    const memberShifts = getUserShiftsForDay(shifts, member.id, day.dateStr).filter((s) => {
-                      if (!config.includeNotes && !s.shift_preset_id) return false;
-                      return true;
-                    });
+                  {/* Shared Events Banner across the day */}
+                  {sharedPresetIds.map((pId) => {
+                    const preset = presets.find((p) => p.id === pId);
+                    const pColor = preset?.color || '#8B5CF6';
+                    return (
+                      <View
+                        key={`w_shared_${pId}`}
+                        style={[
+                          styles.weekSharedBanner,
+                          { backgroundColor: `${pColor}25`, borderColor: pColor },
+                        ]}
+                      >
+                        <Users size={12} color={pColor} />
+                        <Text style={[styles.weekSharedTitle, { color: pColor }]}>
+                          Společná akce: {preset?.title}
+                        </Text>
+                      </View>
+                    );
+                  })}
 
-                    const shiftsWithPreset = memberShifts.map((s) => ({
-                      shift: s,
-                      preset: s.shift_preset_id
-                        ? presets.find((p) => p.id === s.shift_preset_id)
-                        : null,
-                    }));
+                  {/* Individual Shifts for members */}
+                  {dayMemberShifts.map(({ member, shifts: mShifts }) => {
+                    const remaining = mShifts.filter(
+                      (item) => !item.preset || !sharedPresetIds.includes(item.preset.id)
+                    );
 
-                    const hasShifts = shiftsWithPreset.length > 0;
+                    const hasShifts = remaining.length > 0;
+
+                    // If all members share the event and this member has no extra shifts, don't show blank line
+                    if (sharedPresetIds.length > 0 && !hasShifts) {
+                      return null;
+                    }
 
                     return (
                       <View key={`${day.dateStr}_${member.id}`} style={styles.memberShiftLine}>
@@ -516,7 +631,7 @@ export const ScheduleExportCard = forwardRef<View, ScheduleExportCardProps>(
                             <View
                               style={[
                                 styles.memberDot,
-                                { backgroundColor: member.color || '#3B82F6' },
+                                { backgroundColor: member.color || '#38BDF8' },
                               ]}
                             />
                             <Text style={styles.memberNameTagText} numberOfLines={1}>
@@ -527,7 +642,7 @@ export const ScheduleExportCard = forwardRef<View, ScheduleExportCardProps>(
 
                         {hasShifts ? (
                           <View style={styles.shiftBadgesGroup}>
-                            {shiftsWithPreset.map(({ shift, preset }, sIdx) => {
+                            {remaining.map(({ shift, preset }, sIdx) => {
                               const badgeColor = preset?.color || member.color || '#38BDF8';
                               const numHours = Number(preset?.hours);
                               const hasHours = !isNaN(numHours) && numHours > 0;
@@ -650,7 +765,7 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     borderWidth: 1,
     borderColor: '#334155',
-    maxWidth: 220,
+    maxWidth: 240,
   },
   miniAvatar: {
     width: 18,
@@ -749,6 +864,20 @@ const styles = StyleSheet.create({
   shiftsCol: {
     flex: 1,
     gap: 6,
+  },
+  weekSharedBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    borderRadius: 8,
+    borderWidth: 1.5,
+    marginBottom: 2,
+  },
+  weekSharedTitle: {
+    fontSize: 12,
+    fontWeight: '800',
   },
   memberShiftLine: {
     flexDirection: 'row',
@@ -946,6 +1075,21 @@ const styles = StyleSheet.create({
     gap: 2,
     flex: 1,
   },
+  monthSharedBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 4,
+    paddingVertical: 2,
+    borderRadius: 4,
+    borderWidth: 1,
+    gap: 3,
+    marginBottom: 2,
+  },
+  monthSharedText: {
+    fontSize: 9.5,
+    fontWeight: '800',
+  },
   monthShiftMiniBadge: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -966,7 +1110,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
 
-  // MONTH NOTES SECTION UNDER GRID
+  // MONTH NOTES GROUPED BY MEMBER
   monthNotesSection: {
     marginTop: 16,
     paddingTop: 12,
@@ -977,52 +1121,74 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 7,
-    marginBottom: 8,
+    marginBottom: 10,
   },
-  monthNotesTitle: {
+  monthNotesMainTitle: {
     color: '#F59E0B',
     fontSize: 13,
     fontWeight: '800',
     letterSpacing: 0.6,
   },
-  monthNotesGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
+  monthNotesGroupContainer: {
+    gap: 10,
   },
-  monthNoteCard: {
-    width: '49%',
+  monthMemberGroupCard: {
     backgroundColor: '#161F33',
-    borderColor: 'rgba(245, 158, 11, 0.28)',
-    borderWidth: 1,
     borderRadius: 10,
-    padding: 9,
-    gap: 4,
+    borderWidth: 1,
+    borderColor: '#1E293B',
+    padding: 10,
+    gap: 6,
   },
-  monthNoteDateRow: {
+  monthMemberGroupHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    gap: 6,
+    paddingBottom: 4,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.06)',
   },
-  monthNoteDateText: {
-    color: '#38BDF8',
-    fontSize: 12,
+  memberMiniDotLarge: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  monthMemberGroupName: {
+    fontSize: 13,
     fontWeight: '800',
   },
-  monthNoteMemberTag: {
+  monthMemberGroupCount: {
+    color: '#94A3B8',
+    fontSize: 11,
+    fontWeight: '500',
+  },
+  memberNotesList: {
+    gap: 5,
+  },
+  memberNoteItemRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
+    gap: 8,
+    backgroundColor: 'rgba(15, 23, 42, 0.6)',
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
   },
-  monthNoteMemberName: {
-    color: '#CBD5E1',
-    fontSize: 11,
+  memberNoteDateBadge: {
+    backgroundColor: 'rgba(56, 189, 248, 0.15)',
+    borderRadius: 4,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  memberNoteDateText: {
+    color: '#38BDF8',
+    fontSize: 11.5,
     fontWeight: '700',
   },
-  monthNoteContentText: {
+  memberNoteText: {
     color: '#FEF08A',
     fontSize: 12,
     fontWeight: '600',
-    lineHeight: 16,
+    flex: 1,
   },
 });
