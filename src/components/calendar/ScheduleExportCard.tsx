@@ -104,9 +104,11 @@ export const ScheduleExportCard = forwardRef<View, ScheduleExportCardProps>(
     const { groupMembers, currentGroup } = useAuthStore();
     const { shifts, presets } = useShiftStore();
 
-    // Selected members to include
+    // Filter to ONLY selected members (e.g. if Dad selects only Hanka, only Hanka will be included!)
     const activeMembers = (groupMembers || []).filter((m) =>
-      config.selectedMemberIds ? config.selectedMemberIds.includes(m.id) : true
+      config.selectedMemberIds && config.selectedMemberIds.length > 0
+        ? config.selectedMemberIds.includes(m.id)
+        : true
     );
 
     const isAllMembers = activeMembers.length === (groupMembers || []).length;
@@ -125,7 +127,7 @@ export const ScheduleExportCard = forwardRef<View, ScheduleExportCardProps>(
     const isMonthView = config.rangeType === 'current_month';
 
     // -------------------------------------------------------------
-    // 1. MONTH VIEW (CALENDAR POSTER / GRID - NO MORE NOODLE!)
+    // 1. MONTH VIEW (CALENDAR POSTER WITH NOTES UNDER TABLE)
     // -------------------------------------------------------------
     if (isMonthView) {
       const safe = currentDate instanceof Date && !isNaN(currentDate.getTime()) ? currentDate : new Date();
@@ -138,6 +140,35 @@ export const ScheduleExportCard = forwardRef<View, ScheduleExportCardProps>(
       const weekRows: CalendarDay[][] = [];
       for (let i = 0; i < monthDays.length; i += 7) {
         weekRows.push(monthDays.slice(i, i + 7));
+      }
+
+      // Collect all notes in the month for active (selected) members only
+      const monthNotesList: {
+        dateStr: string;
+        dayNumber: number;
+        dayOfWeekName: string;
+        member: (typeof activeMembers)[0];
+        note: string;
+      }[] = [];
+
+      if (config.includeNotes) {
+        for (const cell of monthDays) {
+          if (!cell.isCurrentMonth) continue;
+          for (const m of activeMembers) {
+            const mShifts = getUserShiftsForDay(shifts, m.id, cell.dateStr);
+            for (const s of mShifts) {
+              if (s.note && s.note.trim().length > 0) {
+                monthNotesList.push({
+                  dateStr: cell.dateStr,
+                  dayNumber: cell.dayNumber,
+                  dayOfWeekName: CZECH_DAYS_SHORT[cell.dayOfWeek],
+                  member: m,
+                  note: s.note.trim(),
+                });
+              }
+            }
+          }
+        }
       }
 
       return (
@@ -184,7 +215,8 @@ export const ScheduleExportCard = forwardRef<View, ScheduleExportCardProps>(
               {monthName.toUpperCase()} {year}
             </Text>
             <Text style={styles.monthBannerSubText}>
-              Měsíční rozpis směn • {activeMembers.length} {activeMembers.length === 1 ? 'osoba' : activeMembers.length < 5 ? 'osoby' : 'osob'}
+              Měsíční rozpis směn • {activeMembers.length}{' '}
+              {activeMembers.length === 1 ? 'osoba' : activeMembers.length < 5 ? 'osoby' : 'osob'}
             </Text>
           </View>
 
@@ -219,7 +251,10 @@ export const ScheduleExportCard = forwardRef<View, ScheduleExportCardProps>(
               <View key={`week_${wIdx}`} style={styles.monthWeekRow}>
                 {week.map((cell) => {
                   const dayShiftsByMember = activeMembers.map((m) => {
-                    const shiftsForDay = getUserShiftsForDay(shifts, m.id, cell.dateStr);
+                    const shiftsForDay = getUserShiftsForDay(shifts, m.id, cell.dateStr).filter((s) => {
+                      if (!config.includeNotes && !s.shift_preset_id) return false;
+                      return true;
+                    });
                     return {
                       member: m,
                       shifts: shiftsForDay.map((s) => ({
@@ -291,10 +326,10 @@ export const ScheduleExportCard = forwardRef<View, ScheduleExportCardProps>(
                                     numberOfLines={1}
                                   >
                                     {!isSingleMember ? `${member.display_name.charAt(0)}: ` : ''}
-                                    {preset?.title || 'Poznámka'}
+                                    {preset?.title || (shift.note ? 'Pozn.' : 'Směna')}
                                   </Text>
                                   {config.includeNotes && shift.note && (
-                                    <FileText size={9} color="#F59E0B" style={{ marginLeft: 2 }} />
+                                    <FileText size={8} color="#F59E0B" style={{ marginLeft: 1 }} />
                                   )}
                                 </View>
                               );
@@ -308,6 +343,44 @@ export const ScheduleExportCard = forwardRef<View, ScheduleExportCardProps>(
               </View>
             ))}
           </View>
+
+          {/* Month Notes Section (Placed UNDER table so it's 100% readable and grid stays clean!) */}
+          {config.includeNotes && monthNotesList.length > 0 && (
+            <View style={styles.monthNotesSection}>
+              <View style={styles.monthNotesHeader}>
+                <FileText size={15} color="#F59E0B" />
+                <Text style={styles.monthNotesTitle}>
+                  POZNÁMKY K MĚSÍCI ({monthNotesList.length})
+                </Text>
+              </View>
+
+              <View style={styles.monthNotesGrid}>
+                {monthNotesList.map((item, idx) => (
+                  <View key={`mnote_${idx}`} style={styles.monthNoteCard}>
+                    <View style={styles.monthNoteDateRow}>
+                      <Text style={styles.monthNoteDateText}>
+                        {item.dayNumber}. {item.dayOfWeekName}
+                      </Text>
+                      {!isSingleMember && (
+                        <View style={styles.monthNoteMemberTag}>
+                          <View
+                            style={[
+                              styles.memberMiniDot,
+                              { backgroundColor: item.member.color || '#38BDF8' },
+                            ]}
+                          />
+                          <Text style={styles.monthNoteMemberName}>
+                            {item.member.display_name}
+                          </Text>
+                        </View>
+                      )}
+                    </View>
+                    <Text style={styles.monthNoteContentText}>{item.note}</Text>
+                  </View>
+                ))}
+              </View>
+            </View>
+          )}
 
           {/* Footer info */}
           <View style={styles.cardFooter}>
@@ -422,7 +495,11 @@ export const ScheduleExportCard = forwardRef<View, ScheduleExportCardProps>(
                 {/* Right Shifts Column */}
                 <View style={styles.shiftsCol}>
                   {activeMembers.map((member) => {
-                    const memberShifts = getUserShiftsForDay(shifts, member.id, day.dateStr);
+                    const memberShifts = getUserShiftsForDay(shifts, member.id, day.dateStr).filter((s) => {
+                      if (!config.includeNotes && !s.shift_preset_id) return false;
+                      return true;
+                    });
+
                     const shiftsWithPreset = memberShifts.map((s) => ({
                       shift: s,
                       preset: s.shift_preset_id
@@ -457,36 +534,38 @@ export const ScheduleExportCard = forwardRef<View, ScheduleExportCardProps>(
 
                               return (
                                 <View key={`s_${sIdx}`} style={styles.singleShiftWrapper}>
-                                  <View
-                                    style={[
-                                      styles.shiftPill,
-                                      {
-                                        backgroundColor: `${badgeColor}22`,
-                                        borderColor: badgeColor,
-                                      },
-                                    ]}
-                                  >
-                                    <Text
-                                      style={[styles.shiftPillTitle, { color: badgeColor }]}
+                                  {preset ? (
+                                    <View
+                                      style={[
+                                        styles.shiftPill,
+                                        {
+                                          backgroundColor: `${badgeColor}22`,
+                                          borderColor: badgeColor,
+                                        },
+                                      ]}
                                     >
-                                      {preset?.title || 'Poznámka'}
-                                    </Text>
-                                    {preset?.start_time && preset?.end_time ? (
-                                      <Text style={styles.shiftPillTimes}>
-                                        {preset.start_time} – {preset.end_time}
-                                        {hasHours ? ` (${numHours}h)` : ''}
+                                      <Text
+                                        style={[styles.shiftPillTitle, { color: badgeColor }]}
+                                      >
+                                        {preset.title}
                                       </Text>
-                                    ) : hasHours ? (
-                                      <Text style={styles.shiftPillTimes}>
-                                        {numHours}h
-                                      </Text>
-                                    ) : null}
-                                  </View>
+                                      {preset.start_time && preset.end_time ? (
+                                        <Text style={styles.shiftPillTimes}>
+                                          {preset.start_time} – {preset.end_time}
+                                          {hasHours ? ` (${numHours}h)` : ''}
+                                        </Text>
+                                      ) : hasHours ? (
+                                        <Text style={styles.shiftPillTimes}>
+                                          {numHours}h
+                                        </Text>
+                                      ) : null}
+                                    </View>
+                                  ) : null}
 
-                                  {/* Optional Note Display */}
+                                  {/* Prominent Note Display with exact text */}
                                   {config.includeNotes && shift.note && shift.note.trim().length > 0 && (
                                     <View style={styles.noteBox}>
-                                      <FileText size={11} color="#F59E0B" />
+                                      <FileText size={12} color="#F59E0B" />
                                       <Text style={styles.noteBoxText}>{shift.note}</Text>
                                     </View>
                                   )}
@@ -721,18 +800,18 @@ const styles = StyleSheet.create({
   noteBox: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 5,
-    backgroundColor: 'rgba(245, 158, 11, 0.12)',
-    borderColor: 'rgba(245, 158, 11, 0.25)',
+    gap: 6,
+    backgroundColor: 'rgba(245, 158, 11, 0.16)',
+    borderColor: 'rgba(245, 158, 11, 0.35)',
     borderWidth: 1,
-    borderRadius: 6,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
+    borderRadius: 7,
+    paddingHorizontal: 9,
+    paddingVertical: 4,
     marginTop: 2,
   },
   noteBoxText: {
-    color: '#FDE68A',
-    fontSize: 10.5,
+    color: '#FEF08A',
+    fontSize: 11.5,
     fontWeight: '600',
     flex: 1,
   },
@@ -755,7 +834,7 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
 
-  // MONTH POSTER GRID STYLES (NO MORE NOODLE!)
+  // MONTH POSTER GRID STYLES
   monthCardContainer: {
     width: 820,
     backgroundColor: '#0F172A',
@@ -877,13 +956,73 @@ const styles = StyleSheet.create({
     gap: 3,
   },
   memberMiniDot: {
-    width: 5,
-    height: 5,
-    borderRadius: 2.5,
+    width: 6,
+    height: 6,
+    borderRadius: 3,
   },
   monthShiftMiniText: {
     fontSize: 9.5,
     fontWeight: '800',
     flex: 1,
+  },
+
+  // MONTH NOTES SECTION UNDER GRID
+  monthNotesSection: {
+    marginTop: 16,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#1E293B',
+  },
+  monthNotesHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+    marginBottom: 8,
+  },
+  monthNotesTitle: {
+    color: '#F59E0B',
+    fontSize: 13,
+    fontWeight: '800',
+    letterSpacing: 0.6,
+  },
+  monthNotesGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  monthNoteCard: {
+    width: '49%',
+    backgroundColor: '#161F33',
+    borderColor: 'rgba(245, 158, 11, 0.28)',
+    borderWidth: 1,
+    borderRadius: 10,
+    padding: 9,
+    gap: 4,
+  },
+  monthNoteDateRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  monthNoteDateText: {
+    color: '#38BDF8',
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  monthNoteMemberTag: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  monthNoteMemberName: {
+    color: '#CBD5E1',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  monthNoteContentText: {
+    color: '#FEF08A',
+    fontSize: 12,
+    fontWeight: '600',
+    lineHeight: 16,
   },
 });
