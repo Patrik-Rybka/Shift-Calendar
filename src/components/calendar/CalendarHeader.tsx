@@ -20,6 +20,7 @@ import {
   Calendar as CalendarIcon,
   List,
   User,
+  Camera,
 } from 'lucide-react-native';
 import { useShiftStore } from '@/store/useShiftStore';
 import { useAuthStore } from '@/store/useAuthStore';
@@ -44,9 +45,10 @@ interface CalendarHeaderProps {
   onSave?: () => Promise<void>;
   onAutoSaveMonth?: () => Promise<void>;
   onToast?: (msg: string) => void;
+  onOpenShare?: () => void;
 }
 
-export default function CalendarHeader({ onSave, onAutoSaveMonth, onToast }: CalendarHeaderProps) {
+export default function CalendarHeader({ onSave, onAutoSaveMonth, onToast, onOpenShare }: CalendarHeaderProps) {
   const router = useRouter();
   const isDark = useColorScheme() === 'dark';
 
@@ -248,6 +250,17 @@ export default function CalendarHeader({ onSave, onAutoSaveMonth, onToast }: Cal
         {renderSyncIndicator()}
 
         <View style={styles.actionsRight}>
+          {/* Share Photo Button */}
+          {!isEditMode && onOpenShare && (
+            <TouchableOpacity
+              style={[styles.iconButton, { backgroundColor: ui.card, borderColor: ui.border }]}
+              onPress={onOpenShare}
+              hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
+            >
+              <Camera size={18} color="#38BDF8" />
+            </TouchableOpacity>
+          )}
+
           {/* Settings Button */}
           <TouchableOpacity
             style={[styles.iconButton, { backgroundColor: ui.card, borderColor: ui.border }]}

@@ -28,7 +28,10 @@ import {
   Eye,
   EyeOff,
   Trash2,
+  Camera,
 } from 'lucide-react-native';
+import { captureRef } from 'react-native-view-shot';
+import * as Sharing from 'expo-sharing';
 
 import { useAuthStore } from '@/store/useAuthStore';
 import { useShiftStore, getShiftMapKey, getUserShiftsForDay } from '@/store/useShiftStore';
@@ -43,6 +46,8 @@ import EditToolbar from '@/components/calendar/EditToolbar';
 import ShiftPickerModal from '@/components/calendar/ShiftPickerModal';
 import SuccessConfettiModal from '@/components/common/SuccessConfettiModal';
 import AddMemberModal from '@/components/calendar/AddMemberModal';
+import ShareScheduleModal, { type ShareConfig } from '@/components/calendar/ShareScheduleModal';
+import { ScheduleExportCard } from '@/components/calendar/ScheduleExportCard';
 import DayView from '@/components/calendar/DayView';
 import WeekAgendaView from '@/components/calendar/WeekAgendaView';
 import { getCurrentAppVersion } from '@/services/updateService';
@@ -138,6 +143,10 @@ export default function CalendarScreen() {
   const [confettiSubtitle, setConfettiSubtitle] = useState('Vše je úspěšně synchronizováno v cloudu');
   const [addMemberModalVisible, setAddMemberModalVisible] = useState(false);
   const [currentInitialNote, setCurrentInitialNote] = useState<string | null>(null);
+  const [shareModalVisible, setShareModalVisible] = useState(false);
+  const [exportConfig, setExportConfig] = useState<ShareConfig | null>(null);
+  const [isCapturingShare, setIsCapturingShare] = useState(false);
+  const cardRef = useRef<View>(null);
 
   const ui = {
     bg: isDark ? '#090D16' : '#F8FAFC',
@@ -1297,10 +1306,69 @@ export default function CalendarScreen() {
     }
   }, [currentGroup?.id, syncWithNeon, showToast]);
 
+  const handleConfirmShare = useCallback((config: ShareConfig) => {
+    setExportConfig(config);
+    setIsCapturingShare(true);
+  }, []);
+
+  useEffect(() => {
+    if (!isCapturingShare || !exportConfig) return;
+
+    let isMounted = true;
+
+    const performCaptureAndShare = async () => {
+      try {
+        // Pause to ensure offscreen view is fully mounted and laid out
+        await new Promise((resolve) => setTimeout(resolve, 400));
+        if (!isMounted) return;
+
+        if (!cardRef.current) {
+          throw new Error('Komponenta karty pro snímek nebyla připravena');
+        }
+
+        const uri = await captureRef(cardRef, {
+          format: 'png',
+          quality: 1.0,
+          result: 'tmpfile',
+        });
+
+        const isAvailable = await Sharing.isAvailableAsync();
+        if (isAvailable) {
+          await Sharing.shareAsync(uri, {
+            mimeType: 'image/png',
+            dialogTitle: 'Sdílet rozpis směn',
+            UTI: 'public.png',
+          });
+        } else {
+          Alert.alert('Chyba', 'Sdílení není na tomto zařízení dostupné.');
+        }
+      } catch (err) {
+        console.warn('Capture & share failed:', err);
+        showToast('Obrázek se nepodařilo vytvořit');
+      } finally {
+        if (isMounted) {
+          setIsCapturingShare(false);
+          setExportConfig(null);
+        }
+      }
+    };
+
+    performCaptureAndShare();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [isCapturingShare, exportConfig, showToast]);
+
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: ui.bg }]}>
       {/* 1. Calendar Header (Month navigation, Sync badge, Group Code, Edit toggle) */}
-      <CalendarHeader onSave={handleSaveShifts} onAutoSaveMonth={handleAutoSaveOnMonthSwitch} onToast={showToast} />
+      <CalendarHeader
+        onSave={handleSaveShifts}
+        onAutoSaveMonth={handleAutoSaveOnMonthSwitch}
+        onToast={showToast}
+        onOpenShare={() => setShareModalVisible(true)}
+      />
 
       {/* 2. Main Calendar Content: DayView vs WeekAgendaView vs Month View Grid */}
       {calendarView === 'day' ? (
@@ -1349,6 +1417,15 @@ export default function CalendarScreen() {
                   </Text>
                 </View>
                 <View style={styles.summaryActionsRight}>
+                  <TouchableOpacity
+                    style={[styles.shareBtnSmall, { borderColor: ui.border, backgroundColor: isDark ? '#161F33' : '#F1F5F9' }]}
+                    onPress={() => setShareModalVisible(true)}
+                    activeOpacity={0.75}
+                  >
+                    <Camera size={13} color="#38BDF8" />
+                    <Text style={[styles.shareBtnSmallText, { color: '#38BDF8' }]}>Sdílet fotku</Text>
+                  </TouchableOpacity>
+
                   <TouchableOpacity
                     style={[styles.addMemberBtnSmall, { borderColor: ui.border, backgroundColor: isDark ? '#161F33' : '#F1F5F9' }]}
                     onPress={() => setAddMemberModalVisible(true)}
@@ -1667,7 +1744,51 @@ export default function CalendarScreen() {
         }}
       />
 
-      {/* 8. Docked Editing Toolbar (slides up at the bottom without displacing the calendar!) */}
+      {/* 8. Share Schedule Photo Modal */}
+      <ShareScheduleModal
+        visible={shareModalVisible}
+        onClose={() => setShareModalVisible(false)}
+        onConfirmShare={handleConfirmShare}
+      />
+
+      {/* 9. Offscreen / Hidden Card for Image Generation */}
+      {exportConfig && (
+        <View
+          style={{
+            position: 'absolute',
+            left: -9999,
+            top: -9999,
+            opacity: 0.01,
+          }}
+          pointerEvents="none"
+          collapsable={false}
+        >
+          <ScheduleExportCard
+            ref={cardRef}
+            config={exportConfig}
+            currentDate={currentMonth instanceof Date ? currentMonth : new Date()}
+          />
+        </View>
+      )}
+
+      {/* 10. Generating Image Modal */}
+      {isCapturingShare && (
+        <Modal transparent animationType="fade" visible={isCapturingShare}>
+          <View style={[styles.modalOverlay, { backgroundColor: ui.modalOverlay }]}>
+            <View style={[styles.exportLoadingCard, { backgroundColor: ui.card, borderColor: ui.border }]}>
+              <ActivityIndicator size="large" color={ui.accent} />
+              <Text style={[styles.exportLoadingTitle, { color: ui.text }]}>
+                Vytvářím fotku rozpisu...
+              </Text>
+              <Text style={[styles.exportLoadingSub, { color: ui.textMuted }]}>
+                Za okamžik se otevře nabídka pro odeslání do WhatsAppu
+              </Text>
+            </View>
+          </View>
+        </Modal>
+      )}
+
+      {/* 11. Docked Editing Toolbar (slides up at the bottom without displacing the calendar!) */}
       {isEditMode && (
         <EditToolbar
           onSave={handleSaveShifts}
@@ -2047,6 +2168,43 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 14,
     fontWeight: '700',
+  },
+  shareBtnSmall: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 12,
+    borderWidth: 1,
+  },
+  shareBtnSmallText: {
+    fontSize: 11.5,
+    fontWeight: '700',
+  },
+  exportLoadingCard: {
+    width: 280,
+    borderRadius: 20,
+    borderWidth: 1,
+    padding: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.25,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  exportLoadingTitle: {
+    fontSize: 15,
+    fontWeight: '800',
+    textAlign: 'center',
+  },
+  exportLoadingSub: {
+    fontSize: 12,
+    fontWeight: '500',
+    textAlign: 'center',
   },
   addMemberBtnSmall: {
     flexDirection: 'row',
