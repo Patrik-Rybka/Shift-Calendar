@@ -26,6 +26,7 @@ import {
   FileText,
   User,
   Users,
+  Trash2,
 } from 'lucide-react-native';
 import { useShiftStore } from '@/store/useShiftStore';
 import { useAuthStore } from '@/store/useAuthStore';
@@ -355,21 +356,46 @@ export default function ShiftPickerModal({
                 onChangeText={setNoteText}
               />
               {noteText.length > 0 && (
-                <TouchableOpacity onPress={() => setNoteText('')} style={{ padding: 4 }}>
+                <TouchableOpacity
+                  onPress={() => setNoteText('')}
+                  style={styles.clearNoteIconBtn}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
                   <X size={15} color={ui.textMuted} />
                 </TouchableOpacity>
               )}
             </View>
 
-            {noteText.trim().length > 0 && (
-              <TouchableOpacity
-                style={[styles.saveNoteBtn, { backgroundColor: ui.accent }]}
-                activeOpacity={0.8}
-                onPress={() => onSelectPreset('__NOTE_ONLY__', noteText.trim())}
-              >
-                <Check size={14} color="#FFFFFF" strokeWidth={2.5} />
-                <Text style={styles.saveNoteBtnText}>Uložit pouze poznámku</Text>
-              </TouchableOpacity>
+            {(noteText.trim().length > 0 || (initialNote && initialNote.trim().length > 0)) && (
+              <View style={styles.noteButtonsRow}>
+                {noteText.trim().length > 0 && (
+                  <TouchableOpacity
+                    style={[styles.saveNoteBtn, { backgroundColor: ui.accent }]}
+                    activeOpacity={0.8}
+                    onPress={() => onSelectPreset('__NOTE_ONLY__', noteText.trim())}
+                  >
+                    <Check size={14} color="#FFFFFF" strokeWidth={2.5} />
+                    <Text style={styles.saveNoteBtnText}>Uložit poznámku</Text>
+                  </TouchableOpacity>
+                )}
+
+                {initialNote && initialNote.trim().length > 0 && (
+                  <TouchableOpacity
+                    style={[
+                      styles.deleteNoteBtn,
+                      { backgroundColor: ui.deleteBg, borderColor: ui.deleteBorder },
+                    ]}
+                    activeOpacity={0.8}
+                    onPress={() => {
+                      setNoteText('');
+                      onSelectPreset('__DELETE_NOTE__', null);
+                    }}
+                  >
+                    <Trash2 size={14} color={ui.deleteColor} />
+                    <Text style={[styles.deleteNoteBtnText, { color: ui.deleteColor }]}>Smazat poznámku</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
             )}
           </View>
 
@@ -900,19 +926,44 @@ const styles = StyleSheet.create({
     fontSize: 13.5,
     fontWeight: '500',
   },
+  noteButtonsRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 4,
+  },
   saveNoteBtn: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
     paddingVertical: 9,
     borderRadius: 10,
-    marginTop: 4,
   },
   saveNoteBtnText: {
     color: '#FFFFFF',
     fontSize: 13,
     fontWeight: '700',
+  },
+  deleteNoteBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 9,
+    borderRadius: 10,
+    borderWidth: 1,
+  },
+  deleteNoteBtnText: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  clearNoteIconBtn: {
+    padding: 6,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   sectionHeading: {
     fontSize: 11.5,

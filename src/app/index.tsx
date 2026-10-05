@@ -27,6 +27,7 @@ import {
   Pencil,
   Eye,
   EyeOff,
+  Trash2,
 } from 'lucide-react-native';
 
 import { useAuthStore } from '@/store/useAuthStore';
@@ -145,6 +146,7 @@ export default function CalendarScreen() {
     text: isDark ? '#F9FAFB' : '#0F172A',
     textMuted: isDark ? '#94A3B8' : '#64748B',
     accent: '#3B82F6',
+    deleteColor: isDark ? '#F87171' : '#EF4444',
     modalOverlay: 'rgba(0, 0, 0, 0.65)',
   };
 
@@ -1060,6 +1062,21 @@ export default function CalendarScreen() {
         for (const targetUserId of targetUserIds) {
           if (presetId === '__DELETE__' || presetId === null) {
             removeShift(currentGroup.id, targetUserId, dStr);
+          } else if (presetId === '__DELETE_NOTE__') {
+            const userShifts = getUserShiftsForDay(shifts, targetUserId, dStr);
+            const firstPresetShift = userShifts.find((s) => s.shift_preset_id);
+            if (firstPresetShift && firstPresetShift.shift_preset_id) {
+              applyShift({
+                groupId: currentGroup.id,
+                userId: targetUserId,
+                date: dStr,
+                presetId: firstPresetShift.shift_preset_id,
+                customHours: firstPresetShift.custom_hours,
+                note: null,
+              });
+            } else {
+              removeShift(currentGroup.id, targetUserId, dStr, null);
+            }
           } else if (presetId === '__NOTE_ONLY__') {
             const userShifts = getUserShiftsForDay(shifts, targetUserId, dStr);
             const firstPresetShift = userShifts.find((s) => s.shift_preset_id);
@@ -1090,12 +1107,14 @@ export default function CalendarScreen() {
       const presetObj = presets.find((p) => p.id === presetId);
       const title =
         presetId === '__DELETE__'
-          ? 'Volno'
+          ? 'Volno uloženo'
+          : presetId === '__DELETE_NOTE__'
+          ? 'Poznámka smazána'
           : presetId === '__NOTE_ONLY__'
-          ? 'Poznámka'
-          : presetObj?.title || 'Směna';
+          ? 'Poznámka uložena'
+          : `${presetObj?.title || 'Směna'} uložena`;
       const targetDesc = isAllFamily ? ' pro celou rodinu' : '';
-      showToast(`✓ ${title} uložena${targetDesc}`);
+      showToast(`✓ ${title}${targetDesc}`);
     },
     [
       editingUserId,
@@ -1110,6 +1129,44 @@ export default function CalendarScreen() {
       presets,
       showToast,
     ]
+  );
+
+  const handleDeleteNoteFromDetail = useCallback(
+    async (userId: string, dateStr: string, shift: any) => {
+      if (!currentGroup?.id) return;
+      Alert.alert(
+        'Smazat poznámku?',
+        'Opravdu si přejete smazat tuto poznámku?',
+        [
+          { text: 'Zrušit', style: 'cancel' },
+          {
+            text: 'Smazat',
+            style: 'destructive',
+            onPress: async () => {
+              if (shift.shift_preset_id) {
+                applyShift({
+                  groupId: currentGroup.id,
+                  userId,
+                  date: dateStr,
+                  presetId: shift.shift_preset_id,
+                  customHours: shift.custom_hours,
+                  note: null,
+                });
+              } else {
+                removeShift(currentGroup.id, userId, dateStr, null);
+              }
+              showToast('✓ Poznámka smazána');
+              try {
+                await syncWithNeon(currentGroup.id);
+              } catch (err) {
+                console.warn('Sync failed after handleDeleteNoteFromDetail:', err);
+              }
+            },
+          },
+        ]
+      );
+    },
+    [currentGroup?.id, applyShift, removeShift, showToast, syncWithNeon]
   );
 
   const handleMakeShiftForWholeFamily = useCallback(
@@ -1568,6 +1625,14 @@ export default function CalendarScreen() {
                             <Text style={[styles.modalNoteText, { color: ui.text }]}>
                               {s.note}
                             </Text>
+                            <TouchableOpacity
+                              style={styles.modalNoteDeleteBtn}
+                              onPress={() => handleDeleteNoteFromDetail(member.id, selectedDayDetail.dateStr, s)}
+                              activeOpacity={0.7}
+                              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                            >
+                              <Trash2 size={13} color={ui.deleteColor} />
+                            </TouchableOpacity>
                           </View>
                         ) : null
                       )}
@@ -1956,6 +2021,13 @@ const styles = StyleSheet.create({
     fontSize: 12.5,
     fontWeight: '600',
     flex: 1,
+  },
+  modalNoteDeleteBtn: {
+    padding: 3,
+    borderRadius: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 6,
   },
   modalEditDayBtn: {
     flexDirection: 'row',
