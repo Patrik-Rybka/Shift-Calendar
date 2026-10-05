@@ -6,12 +6,10 @@ import {
   FileText,
   Users,
   CalendarDays,
-  Sparkles,
 } from 'lucide-react-native';
 import { useAuthStore } from '@/store/useAuthStore';
 import { useShiftStore, getUserShiftsForDay } from '@/store/useShiftStore';
-import { useSettingsStore } from '@/store/useSettingsStore';
-import { getCzechHoliday, formatLocalDate } from '@/utils/calendarUtils';
+import { getCzechHoliday, formatLocalDate, generateMonthDays, CalendarDay } from '@/utils/calendarUtils';
 import type { ShareConfig, ShareRangeType } from './ShareScheduleModal';
 
 export interface ScheduleExportCardProps {
@@ -28,6 +26,8 @@ const CZECH_DAYS_LONG = [
   'Pátek',
   'Sobota',
 ];
+
+const CZECH_DAYS_SHORT = ['Po', 'Út', 'St', 'Čt', 'Pá', 'So', 'Ne'];
 
 const CZECH_MONTHS_GENITIVE = [
   'ledna',
@@ -68,54 +68,32 @@ interface ExportDayItem {
   holidayName: string | null;
 }
 
-function computeDays(rangeType: ShareRangeType, baseDate: Date): ExportDayItem[] {
+function computeWeekDays(rangeType: 'current_week' | 'next_week', baseDate: Date): ExportDayItem[] {
   const safe = baseDate instanceof Date && !isNaN(baseDate.getTime()) ? baseDate : new Date();
   const days: ExportDayItem[] = [];
 
-  if (rangeType === 'current_week' || rangeType === 'next_week') {
-    const monday = new Date(safe.getFullYear(), safe.getMonth(), safe.getDate(), 12, 0, 0);
-    const dayOfWeek = (monday.getDay() + 6) % 7; // Monday = 0, Sunday = 6
-    const offset = rangeType === 'next_week' ? (7 - dayOfWeek) : -dayOfWeek;
-    monday.setDate(monday.getDate() + offset);
+  const monday = new Date(safe.getFullYear(), safe.getMonth(), safe.getDate(), 12, 0, 0);
+  const dayOfWeek = (monday.getDay() + 6) % 7; // Monday = 0, Sunday = 6
+  const offset = rangeType === 'next_week' ? (7 - dayOfWeek) : -dayOfWeek;
+  monday.setDate(monday.getDate() + offset);
 
-    for (let i = 0; i < 7; i++) {
-      const d = new Date(monday);
-      d.setDate(monday.getDate() + i);
-      const y = d.getFullYear();
-      const m = d.getMonth();
-      const dayNum = d.getDate();
-      const dateStr = formatLocalDate(y, m, dayNum);
-      const isWeekend = d.getDay() === 0 || d.getDay() === 6;
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(monday);
+    d.setDate(monday.getDate() + i);
+    const y = d.getFullYear();
+    const m = d.getMonth();
+    const dayNum = d.getDate();
+    const dateStr = formatLocalDate(y, m, dayNum);
+    const isWeekend = d.getDay() === 0 || d.getDay() === 6;
 
-      days.push({
-        dateStr,
-        dayNumber: dayNum,
-        dayOfWeekName: CZECH_DAYS_LONG[d.getDay()],
-        fullCzechDate: `${dayNum}. ${CZECH_MONTHS_GENITIVE[m]} ${y}`,
-        isWeekend,
-        holidayName: getCzechHoliday(dateStr),
-      });
-    }
-  } else {
-    // Current month
-    const year = safe.getFullYear();
-    const month = safe.getMonth();
-    const daysInMonth = new Date(year, month + 1, 0).getDate();
-
-    for (let dayNum = 1; dayNum <= daysInMonth; dayNum++) {
-      const d = new Date(year, month, dayNum, 12, 0, 0);
-      const dateStr = formatLocalDate(year, month, dayNum);
-      const isWeekend = d.getDay() === 0 || d.getDay() === 6;
-
-      days.push({
-        dateStr,
-        dayNumber: dayNum,
-        dayOfWeekName: CZECH_DAYS_LONG[d.getDay()],
-        fullCzechDate: `${dayNum}. ${CZECH_MONTHS_GENITIVE[month]} ${year}`,
-        isWeekend,
-        holidayName: getCzechHoliday(dateStr),
-      });
-    }
+    days.push({
+      dateStr,
+      dayNumber: dayNum,
+      dayOfWeekName: CZECH_DAYS_LONG[d.getDay()],
+      fullCzechDate: `${dayNum}. ${CZECH_MONTHS_GENITIVE[m]} ${y}`,
+      isWeekend,
+      holidayName: getCzechHoliday(dateStr),
+    });
   }
 
   return days;
@@ -125,21 +103,228 @@ export const ScheduleExportCard = forwardRef<View, ScheduleExportCardProps>(
   ({ config, currentDate = new Date() }, ref) => {
     const { groupMembers, currentGroup } = useAuthStore();
     const { shifts, presets } = useShiftStore();
-    const { hiddenMemberIds } = useSettingsStore();
 
-    const isAllFamily = config.targetUserId === '__ALL__';
-    const activeMembers = (groupMembers || []).filter(
-      (m) => isAllFamily ? !hiddenMemberIds.includes(m.id) : m.id === config.targetUserId
+    // Selected members to include
+    const activeMembers = (groupMembers || []).filter((m) =>
+      config.selectedMemberIds ? config.selectedMemberIds.includes(m.id) : true
     );
 
-    const targetMember = !isAllFamily
-      ? groupMembers.find((m) => m.id === config.targetUserId)
-      : null;
+    const isAllMembers = activeMembers.length === (groupMembers || []).length;
+    const isSingleMember = activeMembers.length === 1;
 
-    const days = computeDays(config.rangeType, currentDate);
+    // Header Member badge text
+    let memberBadgeText = 'Celá rodina';
+    if (isSingleMember) {
+      memberBadgeText = activeMembers[0].display_name;
+    } else if (!isAllMembers) {
+      memberBadgeText = activeMembers.map((m) => m.display_name).join(' & ');
+    } else {
+      memberBadgeText = `Celá rodina (${activeMembers.length})`;
+    }
 
-    // Compute title & header range subtitle
-    let mainTitle = 'TÝDENNÍ ROZPIS SMĚN';
+    const isMonthView = config.rangeType === 'current_month';
+
+    // -------------------------------------------------------------
+    // 1. MONTH VIEW (CALENDAR POSTER / GRID - NO MORE NOODLE!)
+    // -------------------------------------------------------------
+    if (isMonthView) {
+      const safe = currentDate instanceof Date && !isNaN(currentDate.getTime()) ? currentDate : new Date();
+      const monthIdx = safe.getMonth();
+      const year = safe.getFullYear();
+      const monthName = CZECH_MONTHS_NOMINATIVE[monthIdx];
+      const monthDays = generateMonthDays(safe, 'monday', true);
+
+      // Group days into 7-day week chunks
+      const weekRows: CalendarDay[][] = [];
+      for (let i = 0; i < monthDays.length; i += 7) {
+        weekRows.push(monthDays.slice(i, i + 7));
+      }
+
+      return (
+        <View ref={ref} style={styles.monthCardContainer} collapsable={false}>
+          {/* Card Header */}
+          <View style={styles.cardHeader}>
+            <View style={styles.brandRow}>
+              <View style={styles.brandLogoBox}>
+                <Calendar size={20} color="#38BDF8" strokeWidth={2.5} />
+              </View>
+              <View>
+                <Text style={styles.brandAppName}>Shift Calendar</Text>
+                <Text style={styles.brandGroupTitle}>
+                  {currentGroup?.name || 'Rodinný plánovač'}
+                </Text>
+              </View>
+            </View>
+
+            {/* Member Badge in Header */}
+            <View style={styles.memberHeaderPill}>
+              {isSingleMember ? (
+                <View
+                  style={[
+                    styles.miniAvatar,
+                    { backgroundColor: activeMembers[0]?.color || '#3B82F6' },
+                  ]}
+                >
+                  <Text style={styles.miniAvatarText}>
+                    {activeMembers[0]?.display_name?.charAt(0).toUpperCase() || '?'}
+                  </Text>
+                </View>
+              ) : (
+                <Users size={15} color="#C4B5FD" />
+              )}
+              <Text style={styles.memberHeaderPillText} numberOfLines={1}>
+                {memberBadgeText}
+              </Text>
+            </View>
+          </View>
+
+          {/* Banner Title */}
+          <View style={styles.monthTitleBanner}>
+            <Text style={styles.monthBannerTitleText}>
+              {monthName.toUpperCase()} {year}
+            </Text>
+            <Text style={styles.monthBannerSubText}>
+              Měsíční rozpis směn • {activeMembers.length} {activeMembers.length === 1 ? 'osoba' : activeMembers.length < 5 ? 'osoby' : 'osob'}
+            </Text>
+          </View>
+
+          {/* 7 Column Weekday Header */}
+          <View style={styles.monthGridHeaderRow}>
+            {CZECH_DAYS_SHORT.map((dayName, idx) => {
+              const isWeekend = idx >= 5;
+              return (
+                <View
+                  key={dayName}
+                  style={[
+                    styles.monthGridHeaderCell,
+                    isWeekend && styles.monthGridHeaderCellWeekend,
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.monthGridHeaderText,
+                      isWeekend && styles.monthGridHeaderTextWeekend,
+                    ]}
+                  >
+                    {dayName}
+                  </Text>
+                </View>
+              );
+            })}
+          </View>
+
+          {/* Calendar Grid Matrix */}
+          <View style={styles.monthGridMatrix}>
+            {weekRows.map((week, wIdx) => (
+              <View key={`week_${wIdx}`} style={styles.monthWeekRow}>
+                {week.map((cell) => {
+                  const dayShiftsByMember = activeMembers.map((m) => {
+                    const shiftsForDay = getUserShiftsForDay(shifts, m.id, cell.dateStr);
+                    return {
+                      member: m,
+                      shifts: shiftsForDay.map((s) => ({
+                        shift: s,
+                        preset: s.shift_preset_id
+                          ? presets.find((p) => p.id === s.shift_preset_id)
+                          : null,
+                      })),
+                    };
+                  });
+
+                  const hasAnyShifts = dayShiftsByMember.some((item) => item.shifts.length > 0);
+
+                  return (
+                    <View
+                      key={cell.dateStr}
+                      style={[
+                        styles.monthCell,
+                        !cell.isCurrentMonth && styles.monthCellOtherMonth,
+                        cell.isWeekend && cell.isCurrentMonth && styles.monthCellWeekend,
+                        cell.holidayName && styles.monthCellHoliday,
+                      ]}
+                    >
+                      {/* Cell Header: Day Number & Holiday */}
+                      <View style={styles.monthCellTop}>
+                        <Text
+                          style={[
+                            styles.monthCellDayNumber,
+                            !cell.isCurrentMonth && styles.monthCellDayNumberDim,
+                            cell.isWeekend && cell.isCurrentMonth && styles.monthCellDayNumberWeekend,
+                            cell.holidayName && styles.monthCellDayNumberHoliday,
+                          ]}
+                        >
+                          {cell.dayNumber}
+                        </Text>
+                      </View>
+
+                      {cell.holidayName && cell.isCurrentMonth && (
+                        <Text style={styles.monthCellHolidayText} numberOfLines={1}>
+                          🇨🇿 {cell.holidayName}
+                        </Text>
+                      )}
+
+                      {/* Shifts in this Day Cell */}
+                      <View style={styles.monthCellShiftsArea}>
+                        {cell.isCurrentMonth && hasAnyShifts && (
+                          dayShiftsByMember.map(({ member, shifts: mShifts }) => {
+                            if (mShifts.length === 0) return null;
+                            return mShifts.map(({ shift, preset }, sIdx) => {
+                              const badgeColor = preset?.color || member.color || '#38BDF8';
+                              return (
+                                <View
+                                  key={`ms_${member.id}_${sIdx}`}
+                                  style={[
+                                    styles.monthShiftMiniBadge,
+                                    { backgroundColor: `${badgeColor}25`, borderColor: badgeColor },
+                                  ]}
+                                >
+                                  {!isSingleMember && (
+                                    <View
+                                      style={[
+                                        styles.memberMiniDot,
+                                        { backgroundColor: member.color || '#38BDF8' },
+                                      ]}
+                                    />
+                                  )}
+                                  <Text
+                                    style={[styles.monthShiftMiniText, { color: badgeColor }]}
+                                    numberOfLines={1}
+                                  >
+                                    {!isSingleMember ? `${member.display_name.charAt(0)}: ` : ''}
+                                    {preset?.title || 'Poznámka'}
+                                  </Text>
+                                  {config.includeNotes && shift.note && (
+                                    <FileText size={9} color="#F59E0B" style={{ marginLeft: 2 }} />
+                                  )}
+                                </View>
+                              );
+                            });
+                          })
+                        )}
+                      </View>
+                    </View>
+                  );
+                })}
+              </View>
+            ))}
+          </View>
+
+          {/* Footer info */}
+          <View style={styles.cardFooter}>
+            <Text style={styles.cardFooterText}>
+              Vytvořeno v rodinné aplikaci Shift Calendar pro babičku a rodinu
+            </Text>
+          </View>
+        </View>
+      );
+    }
+
+    // -------------------------------------------------------------
+    // 2. WEEK VIEW (CLEAN 7-DAY LIST FOR SELECTED MEMBERS)
+    // -------------------------------------------------------------
+    const weekRange = config.rangeType === 'next_week' ? 'next_week' : 'current_week';
+    const days = computeWeekDays(weekRange, currentDate);
+    let mainTitle = 'ROZPIS SMĚN NA TENTO TÝDEN';
     let subtitle = '';
 
     if (config.rangeType === 'current_week') {
@@ -147,20 +332,15 @@ export const ScheduleExportCard = forwardRef<View, ScheduleExportCardProps>(
       if (days.length >= 7) {
         subtitle = `${days[0].fullCzechDate} – ${days[6].fullCzechDate}`;
       }
-    } else if (config.rangeType === 'next_week') {
+    } else {
       mainTitle = 'ROZPIS SMĚN NA PŘÍŠTÍ TÝDEN';
       if (days.length >= 7) {
         subtitle = `${days[0].fullCzechDate} – ${days[6].fullCzechDate}`;
       }
-    } else {
-      const monthIdx = currentDate.getMonth();
-      const year = currentDate.getFullYear();
-      mainTitle = `MĚSÍČNÍ ROZPIS SMĚN • ${CZECH_MONTHS_NOMINATIVE[monthIdx].toUpperCase()} ${year}`;
-      subtitle = `Kompletní přehled (${days.length} dnů)`;
     }
 
     return (
-      <View ref={ref} style={styles.cardContainer} collapsable={false}>
+      <View ref={ref} style={styles.weekCardContainer} collapsable={false}>
         {/* Top Header */}
         <View style={styles.cardHeader}>
           <View style={styles.brandRow}>
@@ -177,22 +357,22 @@ export const ScheduleExportCard = forwardRef<View, ScheduleExportCardProps>(
 
           {/* Member Badge in Header */}
           <View style={styles.memberHeaderPill}>
-            {isAllFamily ? (
-              <Users size={14} color="#C4B5FD" />
-            ) : (
+            {isSingleMember ? (
               <View
                 style={[
                   styles.miniAvatar,
-                  { backgroundColor: targetMember?.color || '#3B82F6' },
+                  { backgroundColor: activeMembers[0]?.color || '#3B82F6' },
                 ]}
               >
                 <Text style={styles.miniAvatarText}>
-                  {targetMember?.display_name?.charAt(0).toUpperCase() || '?'}
+                  {activeMembers[0]?.display_name?.charAt(0).toUpperCase() || '?'}
                 </Text>
               </View>
+            ) : (
+              <Users size={14} color="#C4B5FD" />
             )}
-            <Text style={styles.memberHeaderPillText}>
-              {isAllFamily ? 'Celá rodina' : targetMember?.display_name || 'Člen'}
+            <Text style={styles.memberHeaderPillText} numberOfLines={1}>
+              {memberBadgeText}
             </Text>
           </View>
         </View>
@@ -254,7 +434,7 @@ export const ScheduleExportCard = forwardRef<View, ScheduleExportCardProps>(
 
                     return (
                       <View key={`${day.dateStr}_${member.id}`} style={styles.memberShiftLine}>
-                        {isAllFamily && (
+                        {!isSingleMember && (
                           <View style={styles.memberNameTag}>
                             <View
                               style={[
@@ -271,7 +451,7 @@ export const ScheduleExportCard = forwardRef<View, ScheduleExportCardProps>(
                         {hasShifts ? (
                           <View style={styles.shiftBadgesGroup}>
                             {shiftsWithPreset.map(({ shift, preset }, sIdx) => {
-                              const badgeColor = preset?.color || '#38BDF8';
+                              const badgeColor = preset?.color || member.color || '#38BDF8';
                               const numHours = Number(preset?.hours);
                               const hasHours = !isNaN(numHours) && numHours > 0;
 
@@ -340,9 +520,10 @@ export const ScheduleExportCard = forwardRef<View, ScheduleExportCardProps>(
 ScheduleExportCard.displayName = 'ScheduleExportCard';
 
 const styles = StyleSheet.create({
-  cardContainer: {
-    width: 480,
-    backgroundColor: '#0F172A', // High contrast navy blue
+  // WEEK CARD STYLES
+  weekCardContainer: {
+    width: 490,
+    backgroundColor: '#0F172A',
     borderRadius: 20,
     padding: 20,
     borderWidth: 2,
@@ -390,6 +571,7 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     borderWidth: 1,
     borderColor: '#334155',
+    maxWidth: 220,
   },
   miniAvatar: {
     width: 18,
@@ -498,7 +680,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 5,
-    width: 80,
+    width: 78,
   },
   memberDot: {
     width: 7,
@@ -571,5 +753,137 @@ const styles = StyleSheet.create({
     color: '#64748B',
     fontSize: 10,
     fontWeight: '500',
+  },
+
+  // MONTH POSTER GRID STYLES (NO MORE NOODLE!)
+  monthCardContainer: {
+    width: 820,
+    backgroundColor: '#0F172A',
+    borderRadius: 22,
+    padding: 22,
+    borderWidth: 2,
+    borderColor: '#334155',
+  },
+  monthTitleBanner: {
+    paddingVertical: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderBottomWidth: 1,
+    borderBottomColor: '#1E293B',
+  },
+  monthBannerTitleText: {
+    color: '#38BDF8',
+    fontSize: 18,
+    fontWeight: '900',
+    letterSpacing: 1,
+  },
+  monthBannerSubText: {
+    color: '#94A3B8',
+    fontSize: 12,
+    fontWeight: '600',
+    marginTop: 2,
+  },
+  monthGridHeaderRow: {
+    flexDirection: 'row',
+    marginTop: 10,
+    marginBottom: 4,
+    backgroundColor: '#161F33',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#1E293B',
+  },
+  monthGridHeaderCell: {
+    flex: 1,
+    paddingVertical: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  monthGridHeaderCellWeekend: {
+    backgroundColor: 'rgba(244, 63, 94, 0.1)',
+  },
+  monthGridHeaderText: {
+    color: '#E2E8F0',
+    fontSize: 12,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+  },
+  monthGridHeaderTextWeekend: {
+    color: '#F43F5E',
+  },
+  monthGridMatrix: {
+    gap: 4,
+  },
+  monthWeekRow: {
+    flexDirection: 'row',
+    gap: 4,
+  },
+  monthCell: {
+    flex: 1,
+    minHeight: 88,
+    backgroundColor: '#161F33',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#1E293B',
+    padding: 5,
+  },
+  monthCellOtherMonth: {
+    opacity: 0.35,
+    backgroundColor: '#0F172A',
+  },
+  monthCellWeekend: {
+    backgroundColor: '#17203A',
+    borderColor: '#253352',
+  },
+  monthCellHoliday: {
+    borderColor: 'rgba(239, 68, 68, 0.4)',
+    backgroundColor: 'rgba(239, 68, 68, 0.08)',
+  },
+  monthCellTop: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    marginBottom: 2,
+  },
+  monthCellDayNumber: {
+    color: '#F1F5F9',
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  monthCellDayNumberDim: {
+    color: '#64748B',
+  },
+  monthCellDayNumberWeekend: {
+    color: '#F43F5E',
+  },
+  monthCellDayNumberHoliday: {
+    color: '#F87171',
+  },
+  monthCellHolidayText: {
+    color: '#FCA5A5',
+    fontSize: 8,
+    fontWeight: '700',
+    marginBottom: 2,
+  },
+  monthCellShiftsArea: {
+    gap: 2,
+    flex: 1,
+  },
+  monthShiftMiniBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 4,
+    paddingVertical: 2,
+    borderRadius: 4,
+    borderWidth: 1,
+    gap: 3,
+  },
+  memberMiniDot: {
+    width: 5,
+    height: 5,
+    borderRadius: 2.5,
+  },
+  monthShiftMiniText: {
+    fontSize: 9.5,
+    fontWeight: '800',
+    flex: 1,
   },
 });

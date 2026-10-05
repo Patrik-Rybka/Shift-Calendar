@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -7,6 +7,7 @@ import {
   Modal,
   ScrollView,
   Switch,
+  Alert,
 } from 'react-native';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import {
@@ -19,6 +20,8 @@ import {
   Check,
   CalendarDays,
   Camera,
+  CheckSquare,
+  Square,
 } from 'lucide-react-native';
 import { useAuthStore } from '@/store/useAuthStore';
 
@@ -26,7 +29,7 @@ export type ShareRangeType = 'current_week' | 'next_week' | 'current_month';
 
 export interface ShareConfig {
   rangeType: ShareRangeType;
-  targetUserId: string; // '__ALL__' or member id
+  selectedMemberIds: string[]; // List of IDs to include (e.g. ['jirka', 'hanka'])
   includeNotes: boolean;
 }
 
@@ -45,8 +48,17 @@ export default function ShareScheduleModal({
   const { groupMembers, currentUser } = useAuthStore();
 
   const [rangeType, setRangeType] = useState<ShareRangeType>('current_week');
-  const [targetUserId, setTargetUserId] = useState<string>('__ALL__');
+  const [selectedMemberIds, setSelectedMemberIds] = useState<string[]>([]);
   const [includeNotes, setIncludeNotes] = useState<boolean>(false);
+
+  const members = Array.isArray(groupMembers) ? groupMembers : [];
+
+  // Initialize all members selected by default when modal opens
+  useEffect(() => {
+    if (visible && members.length > 0) {
+      setSelectedMemberIds(members.map((m) => m.id));
+    }
+  }, [visible, members.length]);
 
   const ui = {
     modalOverlay: 'rgba(0, 0, 0, 0.65)',
@@ -62,16 +74,40 @@ export default function ShareScheduleModal({
     success: '#10B981',
   };
 
+  const toggleMember = (id: string) => {
+    if (selectedMemberIds.includes(id)) {
+      if (selectedMemberIds.length === 1) {
+        Alert.alert('Výběr', 'V rozpisu musí zůstat alespoň jeden člen rodiny.');
+        return;
+      }
+      setSelectedMemberIds(selectedMemberIds.filter((mId) => mId !== id));
+    } else {
+      setSelectedMemberIds([...selectedMemberIds, id]);
+    }
+  };
+
+  const handleSelectAll = () => {
+    setSelectedMemberIds(members.map((m) => m.id));
+  };
+
+  const handleSelectOnlyMe = () => {
+    if (currentUser?.id) {
+      setSelectedMemberIds([currentUser.id]);
+    }
+  };
+
   const handleShare = () => {
+    if (selectedMemberIds.length === 0) {
+      Alert.alert('Chyba', 'Vyberte alespoň jednoho člena rodiny.');
+      return;
+    }
     onConfirmShare({
       rangeType,
-      targetUserId,
+      selectedMemberIds,
       includeNotes,
     });
     onClose();
   };
-
-  const members = Array.isArray(groupMembers) ? groupMembers : [];
 
   return (
     <Modal
@@ -127,7 +163,7 @@ export default function ShareScheduleModal({
                   </Text>
                 </View>
                 <Text style={[styles.optionDesc, { color: ui.textMuted }]}>
-                  7 dní (velké písmo, ideální pro babičku)
+                  7 dní (velká přehledná písmena pro babičku)
                 </Text>
               </TouchableOpacity>
 
@@ -171,47 +207,37 @@ export default function ShareScheduleModal({
                   </Text>
                 </View>
                 <Text style={[styles.optionDesc, { color: ui.textMuted }]}>
-                  Kompletní přehledová tabulka měsíce
+                  Přehledná tabulka měsíce (jako nástěnný kalendář)
                 </Text>
               </TouchableOpacity>
             </View>
 
-            {/* 2. Target Member Selection */}
-            <Text style={[styles.sectionLabel, { color: ui.textMuted, marginTop: 14 }]}>2. KOHO VYFOTIT</Text>
-            <View style={styles.membersList}>
-              <TouchableOpacity
-                style={[
-                  styles.memberRowCard,
-                  {
-                    backgroundColor: targetUserId === '__ALL__' ? ui.selectedBg : ui.itemBg,
-                    borderColor: targetUserId === '__ALL__' ? ui.selectedBorder : ui.itemBorder,
-                  },
-                ]}
-                onPress={() => setTargetUserId('__ALL__')}
-                activeOpacity={0.75}
-              >
-                <View style={styles.memberLeft}>
-                  <View style={[styles.avatarCircle, { backgroundColor: '#8B5CF6' }]}>
-                    <Users size={14} color="#FFFFFF" />
-                  </View>
-                  <View>
-                    <Text style={[styles.memberName, { color: targetUserId === '__ALL__' ? ui.accent : ui.text }]}>
-                      Celá rodina pohromadě
-                    </Text>
-                    <Text style={[styles.memberSub, { color: ui.textMuted }]}>
-                      Všechny směny všech členů vedle sebe
-                    </Text>
-                  </View>
-                </View>
-                {targetUserId === '__ALL__' && (
-                  <View style={[styles.checkCircle, { backgroundColor: ui.accent }]}>
-                    <Check size={12} color="#FFFFFF" strokeWidth={3} />
-                  </View>
+            {/* 2. Target Member Multi-Selection */}
+            <View style={styles.memberHeaderRow}>
+              <Text style={[styles.sectionLabel, { color: ui.textMuted }]}>
+                2. KOHO ZAHRNOUT DO FOTKY ({selectedMemberIds.length}/{members.length})
+              </Text>
+              <View style={styles.quickSelectBtns}>
+                <TouchableOpacity
+                  style={[styles.quickSelectBtn, { borderColor: ui.border }]}
+                  onPress={handleSelectAll}
+                >
+                  <Text style={[styles.quickSelectBtnText, { color: ui.accent }]}>Všichni</Text>
+                </TouchableOpacity>
+                {currentUser && (
+                  <TouchableOpacity
+                    style={[styles.quickSelectBtn, { borderColor: ui.border }]}
+                    onPress={handleSelectOnlyMe}
+                  >
+                    <Text style={[styles.quickSelectBtnText, { color: ui.accent }]}>Jen já</Text>
+                  </TouchableOpacity>
                 )}
-              </TouchableOpacity>
+              </View>
+            </View>
 
+            <View style={styles.membersList}>
               {members.map((m) => {
-                const isSelected = targetUserId === m.id;
+                const isSelected = selectedMemberIds.includes(m.id);
                 return (
                   <TouchableOpacity
                     key={m.id}
@@ -222,7 +248,7 @@ export default function ShareScheduleModal({
                         borderColor: isSelected ? ui.selectedBorder : ui.itemBorder,
                       },
                     ]}
-                    onPress={() => setTargetUserId(m.id)}
+                    onPress={() => toggleMember(m.id)}
                     activeOpacity={0.75}
                   >
                     <View style={styles.memberLeft}>
@@ -236,15 +262,22 @@ export default function ShareScheduleModal({
                           {m.display_name} {m.id === currentUser?.id ? '(Já)' : ''}
                         </Text>
                         <Text style={[styles.memberSub, { color: ui.textMuted }]}>
-                          Samostatný rozpis pro tuto osobu
+                          {isSelected ? '✓ Bude na fotce' : '✕ Vynechán z fotky'}
                         </Text>
                       </View>
                     </View>
-                    {isSelected && (
-                      <View style={[styles.checkCircle, { backgroundColor: ui.accent }]}>
-                        <Check size={12} color="#FFFFFF" strokeWidth={3} />
-                      </View>
-                    )}
+
+                    <View
+                      style={[
+                        styles.checkboxBox,
+                        {
+                          backgroundColor: isSelected ? ui.accent : 'transparent',
+                          borderColor: isSelected ? ui.accent : ui.textMuted,
+                        },
+                      ]}
+                    >
+                      {isSelected && <Check size={13} color="#FFFFFF" strokeWidth={3} />}
+                    </View>
                   </TouchableOpacity>
                 );
               })}
@@ -284,7 +317,9 @@ export default function ShareScheduleModal({
             activeOpacity={0.88}
           >
             <Share2 size={16} color="#FFFFFF" />
-            <Text style={styles.submitBtnText}>Pokračovat k odeslání fotky</Text>
+            <Text style={styles.submitBtnText}>
+              Pokračovat k odeslání fotky ({selectedMemberIds.length})
+            </Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -381,6 +416,27 @@ const styles = StyleSheet.create({
     marginTop: 2,
     marginLeft: 24,
   },
+  memberHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 14,
+    marginBottom: 2,
+  },
+  quickSelectBtns: {
+    flexDirection: 'row',
+    gap: 6,
+  },
+  quickSelectBtn: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  quickSelectBtnText: {
+    fontSize: 11,
+    fontWeight: '700',
+  },
   membersList: {
     gap: 6,
   },
@@ -419,10 +475,11 @@ const styles = StyleSheet.create({
     fontSize: 10.5,
     fontWeight: '500',
   },
-  checkCircle: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
+  checkboxBox: {
+    width: 22,
+    height: 22,
+    borderRadius: 6,
+    borderWidth: 1.5,
     alignItems: 'center',
     justifyContent: 'center',
   },
