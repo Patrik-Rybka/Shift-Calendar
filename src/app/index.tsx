@@ -1521,55 +1521,28 @@ export default function CalendarScreen() {
                               const hasHours = !isNaN(numHours) && numHours > 0;
 
                               return (
-                                <View key={`m_shift_${shift.id || preset?.id || sIdx}_${sIdx}`} style={{ alignItems: 'flex-end', gap: 4 }}>
-                                  <View
-                                    style={[
-                                      styles.modalShiftBadge,
-                                      {
-                                        backgroundColor: `${cardColor}20`,
-                                        borderColor: cardColor,
-                                      },
-                                    ]}
-                                  >
-                                    <Text style={[styles.modalShiftTitle, { color: cardColor }]}>
-                                      {cardTitle}
+                                <View
+                                  key={`m_shift_${shift.id || preset?.id || sIdx}_${sIdx}`}
+                                  style={[
+                                    styles.modalShiftBadge,
+                                    {
+                                      backgroundColor: `${cardColor}20`,
+                                      borderColor: cardColor,
+                                    },
+                                  ]}
+                                >
+                                  <Text style={[styles.modalShiftTitle, { color: cardColor }]}>
+                                    {cardTitle}
+                                  </Text>
+                                  {preset?.start_time && preset?.end_time ? (
+                                    <Text style={[styles.modalShiftTimes, { color: ui.textMuted }]}>
+                                      {preset.start_time} – {preset.end_time}{hasHours ? ` (${numHours}h)` : ''}
                                     </Text>
-                                    {preset?.start_time && preset?.end_time ? (
-                                      <Text style={[styles.modalShiftTimes, { color: ui.textMuted }]}>
-                                        {preset.start_time} – {preset.end_time}{hasHours ? ` (${numHours}h)` : ''}
-                                      </Text>
-                                    ) : hasHours ? (
-                                      <Text style={[styles.modalShiftTimes, { color: ui.textMuted }]}>
-                                        {numHours}h
-                                      </Text>
-                                    ) : null}
-                                  </View>
-
-                                  {/* Quick Action: Make this shift for the whole family */}
-                                  {preset && (
-                                    <TouchableOpacity
-                                      style={[
-                                        styles.modalQuickFamilyBtn,
-                                        {
-                                          borderColor: ui.border,
-                                          backgroundColor: isDark ? '#161F33' : '#F1F5F9',
-                                        },
-                                      ]}
-                                      onPress={() =>
-                                        handleMakeShiftForWholeFamily(
-                                          preset.id,
-                                          selectedDayDetail.dateStr,
-                                          shift?.note
-                                        )
-                                      }
-                                      activeOpacity={0.7}
-                                    >
-                                      <Users size={11} color="#8B5CF6" />
-                                      <Text style={[styles.modalQuickFamilyBtnText, { color: isDark ? '#C4B5FD' : '#7C3AED' }]}>
-                                        Zapsat celé rodině
-                                      </Text>
-                                    </TouchableOpacity>
-                                  )}
+                                  ) : hasHours ? (
+                                    <Text style={[styles.modalShiftTimes, { color: ui.textMuted }]}>
+                                      {numHours}h
+                                    </Text>
+                                  ) : null}
                                 </View>
                               );
                             })}
@@ -2049,21 +2022,6 @@ const styles = StyleSheet.create({
   modalFamilyBannerSub: {
     fontSize: 11,
     fontWeight: '500',
-  },
-  modalQuickFamilyBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingVertical: 3.5,
-    paddingHorizontal: 8,
-    borderRadius: 8,
-    borderWidth: 1,
-    marginTop: 3,
-    alignSelf: 'flex-end',
-  },
-  modalQuickFamilyBtnText: {
-    fontSize: 10.5,
-    fontWeight: '700',
   },
   summaryActionsRight: {
     flexDirection: 'row',
