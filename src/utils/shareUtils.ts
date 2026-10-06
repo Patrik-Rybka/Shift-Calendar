@@ -1,7 +1,7 @@
 import { Share } from 'react-native';
 import Constants from 'expo-constants';
 
-export const APP_VERSION = Constants.expoConfig?.version || '1.0.7';
+export const APP_VERSION = Constants.expoConfig?.version || '1.0.8';
 
 // Přímý odkaz ke stažení pojmenovaného balíčku s verzí (např. kalendar-smen-v1.0.7.apk)
 export const LATEST_RELEASE_APK_URL =
