@@ -61,6 +61,7 @@ import {
   Terminal,
   Activity,
   ShieldAlert,
+  ExternalLink,
 } from 'lucide-react-native';
 
 import * as Updates from 'expo-updates';
@@ -2380,6 +2381,32 @@ export default function SettingsScreen() {
                   )}
                 </TouchableOpacity>
               </View>
+            </View>
+
+            {/* 2A. Zásady ochrany osobních údajů (Privacy Policy) */}
+            <View style={[styles.prefCard, { backgroundColor: ui.card, borderColor: ui.border }]}>
+              <TouchableOpacity
+                style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}
+                onPress={() => {
+                  Linking.openURL('https://github.com/Patrik-Rybka/Shift-Calendar/blob/main/PRIVACY_POLICY.md').catch(() => {
+                    Alert.alert('Odkaz', 'Zásady ochrany osobních údajů: https://github.com/Patrik-Rybka/Shift-Calendar');
+                  });
+                }}
+                activeOpacity={0.7}
+              >
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
+                  <View style={[styles.sectionIconCircle, { backgroundColor: 'rgba(16, 185, 129, 0.12)', width: 34, height: 34, borderRadius: 17 }]}>
+                    <ShieldCheck size={17} color="#10B981" />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.prefTitle, { color: ui.text }]}>Zásady ochrany osobních údajů</Text>
+                    <Text style={[styles.prefSubtitle, { color: ui.textMuted }]}>
+                      Žádné reklamy, žádné sledování • Otevřít dokument
+                    </Text>
+                  </View>
+                </View>
+                <ExternalLink size={16} color={ui.textMuted} />
+              </TouchableOpacity>
             </View>
 
             {/* 2B. Optimalizace baterie (proti uspávání na Samsungu a Androidu) */}

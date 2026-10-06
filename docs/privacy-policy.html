@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Zásady ochrany osobních údajů | Kalendář směn</title>
+  <style>
+    :root {
+      --primary: #0247C7;
+      --primary-light: #2563EB;
+      --bg: #0B0F19;
+      --card-bg: #111827;
+      --border: #1F2937;
+      --text: #F9FAFB;
+      --text-muted: #9CA3AF;
+      --accent: #10B981;
+    }
+    @media (prefers-color-scheme: light) {
+      :root {
+        --primary: #0247C7;
+        --primary-light: #2563EB;
+        --bg: #F8FAFC;
+        --card-bg: #FFFFFF;
+        --border: #E2E8F0;
+        --text: #0F172A;
+        --text-muted: #64748B;
+        --accent: #059669;
+      }
+    }
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background-color: var(--bg);
+      color: var(--text);
+      line-height: 1.65;
+      padding: 24px 16px 60px;
+    }
+    .container {
+      max-width: 760px;
+      margin: 0 auto;
+    }
+    header {
+      text-align: center;
+      margin-bottom: 32px;
+      padding-bottom: 24px;
+      border-bottom: 1px solid var(--border);
+    }
+    .badge {
+      display: inline-block;
+      padding: 6px 14px;
+      border-radius: 999px;
+      font-size: 13px;
+      font-weight: 600;
+      background: rgba(2, 71, 199, 0.15);
+      color: var(--primary-light);
+      margin-bottom: 12px;
+    }
+    h1 {
+      font-size: 28px;
+      font-weight: 800;
+      margin-bottom: 8px;
+      letter-spacing: -0.5px;
+    }
+    .meta {
+      font-size: 14px;
+      color: var(--text-muted);
+    }
+    .lang-switcher {
+      display: flex;
+      justify-content: center;
+      gap: 12px;
+      margin-top: 16px;
+    }
+    .lang-btn {
+      text-decoration: none;
+      font-size: 13px;
+      font-weight: 600;
+      padding: 6px 14px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      color: var(--text);
+      background: var(--card-bg);
+      transition: all 0.2s;
+    }
+    .lang-btn:hover {
+      border-color: var(--primary-light);
+      color: var(--primary-light);
+    }
+    .section-card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 24px;
+      margin-bottom: 20px;
+      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+    }
+    h2 {
+      font-size: 20px;
+      font-weight: 700;
+      margin-bottom: 14px;
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    h3 {
+      font-size: 16px;
+      font-weight: 600;
+      margin: 16px 0 8px;
+      color: var(--text);
+    }
+    p {
+      margin-bottom: 12px;
+      color: var(--text);
+      font-size: 15px;
+    }
+    ul {
+      margin-left: 20px;
+      margin-bottom: 14px;
+    }
+    li {
+      margin-bottom: 6px;
+      font-size: 15px;
+    }
+    .highlight-box {
+      background: rgba(16, 185, 129, 0.08);
+      border-left: 4px solid var(--accent);
+      padding: 12px 16px;
+      border-radius: 0 8px 8px 0;
+      margin: 16px 0;
+      font-size: 14px;
+    }
+    footer {
+      text-align: center;
+      margin-top: 40px;
+      padding-top: 20px;
+      border-top: 1px solid var(--border);
+      font-size: 13px;
+      color: var(--text-muted);
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="badge">Kalendář směn / Family Shift Calendar</div>
+      <h1>Zásady ochrany osobních údajů</h1>
+      <p class="meta">Privacy Policy • Poslední aktualizace: 6. října 2026</p>
+      <div class="lang-switcher">
+        <a href="#cesky" class="lang-btn">🇨🇿 Česky</a>
+        <a href="#english" class="lang-btn">🇬🇧 English</a>
+      </div>
+    </header>
+
+    <!-- CZECH VERSION -->
+    <section id="cesky">
+      <div class="section-card">
+        <h2>1. Úvodní ustanovení</h2>
+        <p>Tyto zásady ochrany osobních údajů vysvětlují, jak aplikace <strong>Kalendář směn</strong> (dále jen „aplikace“) zpracovává, chrání a uchovává informace o uživatelích.</p>
+        <p>Aplikace byla vytvořena jako soukromý rodinný nástroj pro vzájemné plánování a přehled pracovních směn členů rodiny. Vaše soukromí bereme s maximální vážností.</p>
+        <div class="highlight-box">
+          <strong>Klíčový princip:</strong> Aplikace nezobrazuje žádné reklamy, nesleduje vaši polohu, neprodává vaše údaje třetím stranám a neshromažďuje žádná analytická data pro marketingové účely.
+        </div>
+      </div>
+
+      <div class="section-card">
+        <h2>2. Jaké údaje aplikace shromažďuje</h2>
+        <p>Aplikace shromažďuje pouze minimální údaje nezbytné pro fungování rodinného kalendáře:</p>
+        <ul>
+          <li><strong>Účet a profil:</strong> Uživatelské jméno / přezdívka, přihlašovací identifikátor (e-mail nebo telefon) a zahashované heslo.</li>
+          <li><strong>Údaje o směnách a událostech:</strong> Názvy a časy směn, data a poznámky, které sami do kalendáře zadáte.</li>
+          <li><strong>Rodinná skupina:</strong> Název rodinné skupiny a seznam členů, kteří k ní mají přístup.</li>
+          <li><strong>Technická diagnostika:</strong> Verze aplikace a stav připojení pro účely synchronizace mezi zařízeními.</li>
+        </ul>
+      </div>
+
+      <div class="section-card">
+        <h2>3. Účel zpracování údajů</h2>
+        <p>Veškeré zadané údaje jsou zpracovávány výhradně za těmito účely:</p>
+        <ul>
+          <li>Zobrazení a správa pracovních směn pro vás a vaši rodinu.</li>
+          <li>Bezpečná synchronizace mezi vašimi telefony v reálném čase.</li>
+          <li>Možnost exportovat rozpis do obrázku pro zaslání členům rodiny přes komunikační aplikace (např. WhatsApp).</li>
+        </ul>
+      </div>
+
+      <div class="section-card">
+        <h2>4. Cloudové úložiště a zabezpečení</h2>
+        <p>Data jsou uložena v zabezpečené cloudové PostgreSQL databázi (Neon Database). Veškerá komunikace mezi vaším telefonem a serverem probíhá šifrovaně prostřednictvím standardního protokolu TLS/HTTPS.</p>
+        <p>Hesla jsou ukládána výhradně v podobě kryptografického hashe a nikdo (ani správce databáze) nemá přístup k vašemu heslu v otevřeném textu.</p>
+      </div>
+
+      <div class="section-card">
+        <h2>5. Oprávnění v telefonu</h2>
+        <p>Aplikace vyžaduje pouze dvě základní systémová oprávnění:</p>
+        <ul>
+          <li><code>INTERNET</code> – pro stahování a ukládání směn do rodinné databáze.</li>
+          <li><code>ACCESS_NETWORK_STATE</code> – pro zjištění, zda je telefon připojen k internetu (offline/online režim).</li>
+        </ul>
+        <p>Aplikace <strong>nevyžaduje</strong> přístup k poloze, fotoaparátu, mikrofonu, kontaktům ani k plnému úložišti souborů.</p>
+      </div>
+
+      <div class="section-card">
+        <h2>6. Vaše práva a výmaz údajů</h2>
+        <p>Máte plné právo kdykoliv:</p>
+        <ul>
+          <li>Smazat libovolnou směnu, poznámku nebo profil přímo v aplikaci.</li>
+          <li>Požádat o kompletní výmaz veškerých vašich údajů a rodinné skupiny.</li>
+        </ul>
+        <p>Pro žádost o výmaz kontaktujte vývojáře na níže uvedeném e-mailu.</p>
+      </div>
+
+      <div class="section-card">
+        <h2>7. Kontakt na vývojáře</h2>
+        <p>V případě jakýchkoliv dotazů ohledně ochrany soukromí se obraťte na:</p>
+        <p><strong>Vývojář:</strong> Patrik Rybka<br>
+        <strong>E-mail:</strong> patrik.rybka.dev@gmail.com<br>
+        <strong>Projekt:</strong> <a href="https://github.com/Patrik-Rybka/Shift-Calendar" style="color: var(--primary-light);">GitHub / Shift-Calendar</a></p>
+      </div>
+    </section>
+
+    <!-- ENGLISH VERSION -->
+    <section id="english" style="margin-top: 40px;">
+      <header>
+        <div class="badge">English Version</div>
+        <h2>Privacy Policy for Family Shift Calendar</h2>
+        <p class="meta">Effective Date: October 6, 2026</p>
+      </header>
+
+      <div class="section-card">
+        <h2>1. Overview</h2>
+        <p>This Privacy Policy explains how <strong>Kalendář směn (Family Shift Calendar)</strong> collects, uses, and safeguards information when you use our mobile application.</p>
+        <p>The application is designed as a private, secure utility for families to coordinate work shifts and schedules. We respect your privacy and handle your data with care.</p>
+      </div>
+
+      <div class="section-card">
+        <h2>2. Data Collected</h2>
+        <p>We collect only the minimal data strictly required to deliver scheduling functionality:</p>
+        <ul>
+          <li><strong>Account Information:</strong> Display name/nickname, login credential (email or phone number), and cryptographically hashed password.</li>
+          <li><strong>Schedule Data:</strong> Shift presets, dates, work times, and user notes entered into the calendar.</li>
+          <li><strong>Family Group Information:</strong> Group name and assigned member profiles within your private group.</li>
+          <li><strong>Technical Diagnostics:</strong> App version and network connectivity status for sync management.</li>
+        </ul>
+        <p>We do not collect advertising IDs, track your location, or share data with data brokers.</p>
+      </div>
+
+      <div class="section-card">
+        <h2>3. Third-Party Services & Security</h2>
+        <p>Data is stored in an encrypted cloud database provided by Neon Database (Serverless PostgreSQL) using TLS/HTTPS encryption in transit and encryption at rest.</p>
+        <p>App updates may be delivered via Expo Application Services (EAS) without collecting personal information.</p>
+      </div>
+
+      <div class="section-card">
+        <h2>4. Device Permissions</h2>
+        <p>The application requests only two standard Android permissions:</p>
+        <ul>
+          <li><code>android.permission.INTERNET</code> – To securely synchronize shift schedules with your family group.</li>
+          <li><code>android.permission.ACCESS_NETWORK_STATE</code> – To provide offline mode indicators.</li>
+        </ul>
+      </div>
+
+      <div class="section-card">
+        <h2>5. Data Retention and Deletion</h2>
+        <p>Users may delete their shifts, entries, and profiles at any time directly through the app interface. If you wish to permanently delete your entire family group and all associated records from the cloud database, please contact us at the email below.</p>
+      </div>
+
+      <div class="section-card">
+        <h2>6. Contact Us</h2>
+        <p>If you have questions or requests regarding your data, contact:</p>
+        <p><strong>Developer:</strong> Patrik Rybka<br>
+        <strong>Email:</strong> patrik.rybka.dev@gmail.com<br>
+        <strong>Repository:</strong> <a href="https://github.com/Patrik-Rybka/Shift-Calendar" style="color: var(--primary-light);">github.com/Patrik-Rybka/Shift-Calendar</a></p>
+      </div>
+    </section>
+
+    <footer>
+      <p>© 2026 Kalendář směn (Family Shift Calendar) • Patrik Rybka</p>
+    </footer>
+  </div>
+</body>
+</html>
