@@ -138,6 +138,7 @@ export default function DiagnosticModal({ visible, onClose }: DiagnosticModalPro
             logger.info('STORAGE', 'Správce vyžádal vyčištění mezipaměti směn.');
             try {
               useShiftStore.getState().setShifts([]);
+              useShiftStore.getState().discardPendingChanges();
               await syncWithNeon(currentGroup.id);
               logger.success('STORAGE', 'Mezipaměť úspěšně obnovena z Neon DB.');
               Alert.alert('Hotovo', 'Mezipaměť kalendáře byla úspěšně obnovena ze serveru.');

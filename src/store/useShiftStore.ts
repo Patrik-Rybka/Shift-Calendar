@@ -111,6 +111,7 @@ export interface ShiftState {
   setRangeEnd: (date: string | null) => void;
   clearRangeSelection: () => void;
   discardPendingChanges: () => void;
+  reconcilePendingChanges: () => void;
 
   // Optimistic shift manipulation
   applyShift: (params: {
@@ -237,6 +238,38 @@ export const useShiftStore = create<ShiftState>()(
       setRangeEnd: (date) => set({ rangeEnd: date }),
       clearRangeSelection: () => set({ rangeStart: null, rangeEnd: null }),
       discardPendingChanges: () => set({ pendingChanges: {}, syncStatus: 'synced', undoStack: [], isEraserMode: false }),
+      reconcilePendingChanges: () => {
+        set((state) => {
+          const nextPending = { ...state.pendingChanges };
+          let changed = false;
+
+          for (const [key, item] of Object.entries(nextPending)) {
+            if (item.action === 'upsert') {
+              const existing = state.shifts[key];
+              // If shift already exists in local cache with server ID (UUID) and matching/newer updated_at, it is already committed to Neon!
+              if (existing && !existing.id.startsWith('local_') && existing.updated_at >= item.shift.updated_at) {
+                delete nextPending[key];
+                changed = true;
+              }
+            } else if (item.action === 'delete') {
+              const existing = state.shifts[key];
+              if (!existing && state.lastSyncedAt && item.timestamp <= new Date(state.lastSyncedAt).getTime()) {
+                delete nextPending[key];
+                changed = true;
+              }
+            }
+          }
+
+          if (changed) {
+            const count = Object.keys(nextPending).length;
+            return {
+              pendingChanges: nextPending,
+              syncStatus: count > 0 ? state.syncStatus : 'synced',
+            };
+          }
+          return {};
+        });
+      },
 
       undo: () => {
         const { undoStack } = get();
@@ -449,6 +482,7 @@ export const useShiftStore = create<ShiftState>()(
             }
 
             get().setShifts(remoteShifts, startDate, endDate);
+            get().reconcilePendingChanges();
 
             const now = new Date().toISOString();
             set({
@@ -480,6 +514,11 @@ export const useShiftStore = create<ShiftState>()(
     {
       name: 'family-shift-data-storage',
       storage: createJSONStorage(() => AsyncStorage),
+      onRehydrateStorage: () => (state, error) => {
+        if (!error && state && typeof state.reconcilePendingChanges === 'function') {
+          state.reconcilePendingChanges();
+        }
+      },
       partialize: (state) => ({
         presets: state.presets,
         shifts: state.shifts,
