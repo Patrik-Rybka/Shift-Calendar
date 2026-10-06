@@ -11,6 +11,7 @@ import {
   Alert,
   AppState,
   Platform,
+  BackHandler,
 } from 'react-native';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -1302,6 +1303,97 @@ export default function CalendarScreen() {
     }
   }, [currentGroup?.id, currentMonth, discardPendingChanges, setEditMode, showToast]);
 
+  // Step 4.2: Hardware Back Button Handling (Android)
+  useEffect(() => {
+    const onBackPress = () => {
+      // 1. Modals & Overlays (reverse hierarchy)
+      if (selectedDayDetail) {
+        setSelectedDayDetail(null);
+        return true;
+      }
+      if (shareModalVisible) {
+        setShareModalVisible(false);
+        return true;
+      }
+      if (addMemberModalVisible) {
+        setAddMemberModalVisible(false);
+        return true;
+      }
+      if (pickerVisible) {
+        setPickerVisible(false);
+        return true;
+      }
+      if (confettiVisible) {
+        setConfettiVisible(false);
+        return true;
+      }
+      if (isCapturingShare) {
+        setIsCapturingShare(false);
+        return true;
+      }
+
+      // 2. Active Range Selection
+      if (rangeStart || rangeEnd) {
+        clearRangeSelection();
+        return true;
+      }
+
+      // 3. Active Eraser Mode
+      if (isEraserMode) {
+        setEraserMode(false);
+        return true;
+      }
+
+      // 4. Active Edit Mode
+      if (isEditMode) {
+        const hasPending = Object.keys(pendingChanges || {}).length > 0;
+        if (hasPending) {
+          Alert.alert(
+            'Zahodit neuložené změny?',
+            'V kalendáři máte provedené úpravy. Chcete je zahodit a vrátit se do původního stavu?',
+            [
+              { text: 'Pokračovat v úpravách', style: 'cancel' },
+              {
+                text: 'Zahodit',
+                style: 'destructive',
+                onPress: async () => {
+                  clearRangeSelection();
+                  await handleCancelEdit();
+                },
+              },
+            ]
+          );
+        } else {
+          clearRangeSelection();
+          setEditMode(false);
+        }
+        return true;
+      }
+
+      // 5. Default Android behavior on root screen (minimize/exit)
+      return false;
+    };
+
+    const backSub = BackHandler.addEventListener('hardwareBackPress', onBackPress);
+    return () => backSub.remove();
+  }, [
+    selectedDayDetail,
+    shareModalVisible,
+    addMemberModalVisible,
+    pickerVisible,
+    confettiVisible,
+    isCapturingShare,
+    rangeStart,
+    rangeEnd,
+    isEraserMode,
+    isEditMode,
+    pendingChanges,
+    clearRangeSelection,
+    setEraserMode,
+    setEditMode,
+    handleCancelEdit,
+  ]);
+
   const handleDayPress = (day: CalendarDay) => {
     setSelectedDate(day.dateStr);
     if (isEditMode) {
@@ -1811,7 +1903,12 @@ export default function CalendarScreen() {
 
       {/* 10. Generating Image Modal */}
       {isCapturingShare && (
-        <Modal transparent animationType="fade" visible={isCapturingShare}>
+        <Modal
+          transparent
+          animationType="fade"
+          visible={isCapturingShare}
+          onRequestClose={() => setIsCapturingShare(false)}
+        >
           <View style={[styles.modalOverlay, { backgroundColor: ui.modalOverlay }]}>
             <View style={[styles.exportLoadingCard, { backgroundColor: ui.card, borderColor: ui.border }]}>
               <ActivityIndicator size="large" color={ui.accent} />
