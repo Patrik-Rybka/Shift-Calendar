@@ -21,6 +21,12 @@
         "buildType": "apk"
       },
       "channel": "production"
+    },
+    "production-aab": {
+      "android": {
+        "buildType": "app-bundle"
+      },
+      "channel": "production"
     }
   },
   "submit": {
