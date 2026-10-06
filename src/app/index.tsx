@@ -274,24 +274,41 @@ export default function CalendarScreen() {
     };
   }, [syncStatus, currentGroup?.id, syncWithNeon, showToast]);
 
+  const lastFlushedPendingSignatureRef = useRef<string>('');
+  const flushFailureCountRef = useRef<number>(0);
+
   // Step 6.3: Auto-flush pending changes when connection is restored/online and user is not editing
   useEffect(() => {
-    const pendingCount = Object.keys(pendingChanges).length;
+    const pendingKeys = Object.keys(pendingChanges);
+    const pendingCount = pendingKeys.length;
     if (pendingCount === 0 || isEditMode || syncStatus === 'offline' || syncStatus === 'syncing' || !currentGroup?.id) {
       return;
     }
 
+    const currentSignature = `${pendingKeys.sort().join('|')}_${pendingCount}`;
+    // If these exact pending changes were already attempted and didn't clear, back off to prevent rapid looping
+    if (lastFlushedPendingSignatureRef.current === currentSignature && flushFailureCountRef.current > 0) {
+      return;
+    }
+
+    const flushDelay = flushFailureCountRef.current === 0 ? 1500 : 30000;
+
     const flushTimer = setTimeout(async () => {
       if (AppState.currentState !== 'active') return;
+      lastFlushedPendingSignatureRef.current = currentSignature;
       try {
         const ok = await syncWithNeon(currentGroup.id);
         if (ok) {
+          flushFailureCountRef.current = 0;
           showToast(`✓ ${pendingCount} změn automaticky odesláno do cloudu`);
+        } else {
+          flushFailureCountRef.current += 1;
         }
       } catch (e) {
+        flushFailureCountRef.current += 1;
         console.warn('Auto-flush notice:', e);
       }
-    }, 1500);
+    }, flushDelay);
 
     return () => clearTimeout(flushTimer);
   }, [pendingChanges, isEditMode, syncStatus, currentGroup?.id, syncWithNeon, showToast]);

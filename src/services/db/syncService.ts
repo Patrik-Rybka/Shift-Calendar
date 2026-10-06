@@ -15,37 +15,76 @@ export async function batchUpsertShifts(shiftsToUpsert: DbShift[]): Promise<bool
   if (shiftsToUpsert.length === 0) return true;
 
   try {
-    const upsertPromises = shiftsToUpsert.map((shift) => {
-      const dateStr = typeof shift.date === 'string' ? shift.date.split('T')[0] : shift.date;
+    const CHUNK_SIZE = 15;
+    for (let i = 0; i < shiftsToUpsert.length; i += CHUNK_SIZE) {
+      const chunk = shiftsToUpsert.slice(i, i + CHUNK_SIZE);
+      const upsertPromises = chunk.map(async (shift) => {
+        const dateStr = typeof shift.date === 'string' ? shift.date.split('T')[0] : shift.date;
 
-      return sql`
-        INSERT INTO shifts (
-          group_id,
-          user_id,
-          date,
-          shift_preset_id,
-          custom_hours,
-          note,
-          updated_at
-        )
-        VALUES (
-          ${shift.group_id},
-          ${shift.user_id},
-          ${dateStr},
-          ${shift.shift_preset_id || null},
-          ${shift.custom_hours ?? null},
-          ${shift.note || null},
-          NOW()
-        )
-        ON CONFLICT (group_id, user_id, date, shift_preset_id)
-        DO UPDATE SET
-          custom_hours = EXCLUDED.custom_hours,
-          note = EXCLUDED.note,
-          updated_at = NOW();
-      `;
-    });
+        try {
+          await sql`
+            INSERT INTO shifts (
+              group_id,
+              user_id,
+              date,
+              shift_preset_id,
+              custom_hours,
+              note,
+              updated_at
+            )
+            VALUES (
+              ${shift.group_id},
+              ${shift.user_id},
+              ${dateStr},
+              ${shift.shift_preset_id || null},
+              ${shift.custom_hours ?? null},
+              ${shift.note || null},
+              NOW()
+            )
+            ON CONFLICT (group_id, user_id, date, shift_preset_id)
+            DO UPDATE SET
+              custom_hours = EXCLUDED.custom_hours,
+              note = EXCLUDED.note,
+              updated_at = NOW();
+          `;
+        } catch (err: any) {
+          // If foreign key violation on shift_preset_id (preset was deleted or changed), retry safely with null preset
+          if (shift.shift_preset_id && err?.message && err.message.includes('shift_preset_id')) {
+            console.warn('Shift preset foreign key invalid in DB, falling back to null preset:', shift.shift_preset_id);
+            await sql`
+              INSERT INTO shifts (
+                group_id,
+                user_id,
+                date,
+                shift_preset_id,
+                custom_hours,
+                note,
+                updated_at
+              )
+              VALUES (
+                ${shift.group_id},
+                ${shift.user_id},
+                ${dateStr},
+                NULL,
+                ${shift.custom_hours ?? null},
+                ${shift.note || null},
+                NOW()
+              )
+              ON CONFLICT (group_id, user_id, date, shift_preset_id)
+              DO UPDATE SET
+                custom_hours = EXCLUDED.custom_hours,
+                note = EXCLUDED.note,
+                updated_at = NOW();
+            `;
+          } else {
+            throw err;
+          }
+        }
+      });
 
-    await Promise.all(upsertPromises);
+      await Promise.all(upsertPromises);
+    }
+
     return true;
   } catch (error) {
     console.error('Failed to batch upsert shifts:', error);
@@ -60,37 +99,43 @@ export async function batchDeleteShifts(targets: ShiftDeleteTarget[]): Promise<b
   if (targets.length === 0) return true;
 
   try {
-    const deletePromises = targets.map((target) => {
-      const dateStr = typeof target.date === 'string' ? target.date.split('T')[0] : target.date;
+    const CHUNK_SIZE = 15;
+    for (let i = 0; i < targets.length; i += CHUNK_SIZE) {
+      const chunk = targets.slice(i, i + CHUNK_SIZE);
+      const deletePromises = chunk.map((target) => {
+        const dateStr = typeof target.date === 'string' ? target.date.split('T')[0] : target.date;
 
-      if (target.presetId === null) {
+        if (target.presetId === null) {
+          return sql`
+            DELETE FROM shifts
+            WHERE group_id = ${target.groupId}
+              AND user_id = ${target.userId}
+              AND date = ${dateStr}::DATE
+              AND shift_preset_id IS NULL;
+          `;
+        }
+
+        if (target.presetId !== undefined && target.presetId !== null && target.presetId !== '') {
+          return sql`
+            DELETE FROM shifts
+            WHERE group_id = ${target.groupId}
+              AND user_id = ${target.userId}
+              AND date = ${dateStr}::DATE
+              AND shift_preset_id = ${target.presetId};
+          `;
+        }
+
         return sql`
           DELETE FROM shifts
           WHERE group_id = ${target.groupId}
             AND user_id = ${target.userId}
-            AND date = ${dateStr}::DATE
-            AND shift_preset_id IS NULL;
+            AND date = ${dateStr}::DATE;
         `;
-      }
+      });
 
-      if (target.presetId !== undefined && target.presetId !== null && target.presetId !== '') {
-        return sql`
-          DELETE FROM shifts
-          WHERE group_id = ${target.groupId}
-            AND user_id = ${target.userId}
-            AND date = ${dateStr}::DATE
-            AND shift_preset_id = ${target.presetId};
-        `;
-      }
+      await Promise.all(deletePromises);
+    }
 
-      return sql`
-        DELETE FROM shifts
-        WHERE group_id = ${target.groupId}
-          AND user_id = ${target.userId}
-          AND date = ${dateStr}::DATE;
-      `;
-    });
-    await Promise.all(deletePromises);
     return true;
   } catch (error) {
     console.error('Failed to batch delete shifts:', error);

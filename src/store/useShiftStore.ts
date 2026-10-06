@@ -371,18 +371,17 @@ export const useShiftStore = create<ShiftState>()(
 
           try {
             // 1. Flush pending local changes to Neon
-            const pendingList = Object.values(pendingChanges);
-            const upserts = pendingList
-              .filter((p) => p.action === 'upsert')
-              .map((p) => p.shift);
-            const deletes: ShiftDeleteTarget[] = pendingList
-              .filter((p) => p.action === 'delete')
-              .map((p) => ({
-                groupId: p.shift.group_id,
-                userId: p.shift.user_id,
-                date: typeof p.shift.date === 'string' ? p.shift.date.split('T')[0] : p.shift.date,
-                presetId: p.shift.shift_preset_id,
-              }));
+            const pendingEntries = Object.entries(pendingChanges);
+            const upsertEntries = pendingEntries.filter(([_, p]) => p.action === 'upsert');
+            const deleteEntries = pendingEntries.filter(([_, p]) => p.action === 'delete');
+
+            const upserts = upsertEntries.map(([_, p]) => p.shift);
+            const deletes: ShiftDeleteTarget[] = deleteEntries.map(([_, p]) => ({
+              groupId: p.shift.group_id,
+              userId: p.shift.user_id,
+              date: typeof p.shift.date === 'string' ? p.shift.date.split('T')[0] : p.shift.date,
+              presetId: p.shift.shift_preset_id,
+            }));
 
             if (upserts.length > 0 || deletes.length > 0) {
               logger.info('SYNC', `Odesílám lokální změny: ${upserts.length} uložení, ${deletes.length} smazání.`);
@@ -398,14 +397,32 @@ export const useShiftStore = create<ShiftState>()(
               if (!ok) throw new Error('Batch delete failed');
             }
 
-            // Atomically clear only the successfully flushed changes
+            // Atomically clear all successfully flushed changes using exact keys + robust fallbacks
             set((state) => {
               const nextPending = { ...state.pendingChanges };
-              for (const item of pendingList) {
-                const dateStr = typeof item.shift.date === 'string' ? item.shift.date.split('T')[0] : item.shift.date;
-                const key = getShiftMapKey(item.shift.user_id, dateStr, item.shift.shift_preset_id);
+              for (const [key, item] of pendingEntries) {
+                // 1. Exact dictionary key match
                 if (nextPending[key] && nextPending[key].timestamp <= item.timestamp) {
                   delete nextPending[key];
+                  continue;
+                }
+                // 2. Fallback key match (computed)
+                const dateStr = typeof item.shift.date === 'string' ? item.shift.date.split('T')[0] : item.shift.date;
+                const altKey = getShiftMapKey(item.shift.user_id, dateStr, item.shift.shift_preset_id);
+                if (nextPending[altKey] && nextPending[altKey].timestamp <= item.timestamp) {
+                  delete nextPending[altKey];
+                  continue;
+                }
+                // 3. Deep match in case key had legacy prefix or format
+                for (const [k, p] of Object.entries(nextPending)) {
+                  if (
+                    p.shift.user_id === item.shift.user_id &&
+                    (p.shift.date === item.shift.date || (typeof p.shift.date === 'string' && p.shift.date.startsWith(dateStr))) &&
+                    p.shift.shift_preset_id === item.shift.shift_preset_id &&
+                    p.timestamp <= item.timestamp
+                  ) {
+                    delete nextPending[k];
+                  }
                 }
               }
               return { pendingChanges: nextPending };
