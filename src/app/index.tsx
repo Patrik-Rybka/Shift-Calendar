@@ -461,6 +461,21 @@ export default function CalendarScreen() {
               color,
               title,
             });
+          } else if (shift && !shift.shift_preset_id && shift.note && shift.note.trim().length > 0) {
+            // Note-only entry (e.g. child appointment, school, doctor without shift preset)
+            const noteText = shift.note.trim();
+            const groupKey = `note_${noteText}`;
+            if (!presetGroups[groupKey]) {
+              presetGroups[groupKey] = [];
+            }
+            presetGroups[groupKey].push({
+              member,
+              customHours: null,
+              note: noteText,
+              preset: undefined,
+              color: member.color || '#F59E0B',
+              title: noteText,
+            });
           }
         }
       }
@@ -1032,14 +1047,15 @@ export default function CalendarScreen() {
   );
 
   const handleDayTapInEditMode = useCallback(
-    (day: CalendarDay) => {
+    (day: CalendarDay, explicitUserId?: string) => {
       if (!day.isCurrentMonth || !currentGroup?.id) return;
 
       const isAllFamily = editingUserId === '__ALL__';
       const targetUserId =
-        isAllFamily
+        explicitUserId ||
+        (isAllFamily
           ? (currentUser?.id || groupMembers[0]?.id)
-          : (editingUserId || currentUser?.id);
+          : (editingUserId || currentUser?.id));
 
       if (!targetUserId) return;
 
@@ -1297,10 +1313,13 @@ export default function CalendarScreen() {
     setSelectedDayDetail(day);
   };
 
-  const handleEditThisDay = (day: CalendarDay) => {
+  const handleEditThisDay = (day: CalendarDay, explicitUserId?: string) => {
     setSelectedDayDetail(null);
+    if (explicitUserId) {
+      setEditingUserId(explicitUserId);
+    }
     setEditMode(true);
-    handleDayTapInEditMode(day);
+    handleDayTapInEditMode(day, explicitUserId);
   };
 
   const handleAutoSaveOnMonthSwitch = useCallback(async () => {
@@ -1637,8 +1656,10 @@ export default function CalendarScreen() {
 
                   return (
                     <View key={member.id} style={{ gap: 4, opacity: isHidden ? 0.6 : 1 }}>
-                      <View
+                      <TouchableOpacity
                         style={[styles.modalMemberRow, { borderColor: ui.border }]}
+                        activeOpacity={0.75}
+                        onPress={() => handleEditThisDay(selectedDayDetail, member.id)}
                       >
                         {/* Member Info */}
                         <View style={styles.modalMemberInfo}>
@@ -1696,11 +1717,14 @@ export default function CalendarScreen() {
                             })}
                           </View>
                         ) : (
-                          <Text style={[styles.noShiftText, { color: ui.textMuted }]}>
-                            Bez zapsané směny
-                          </Text>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+                            <Text style={[styles.noShiftText, { color: ui.textMuted }]}>
+                              Bez zapsané směny
+                            </Text>
+                            <Pencil size={11} color={ui.accent} />
+                          </View>
                         )}
-                      </View>
+                      </TouchableOpacity>
 
                       {/* Display shift notes if any */}
                       {memberShifts.map((s, nIdx) =>

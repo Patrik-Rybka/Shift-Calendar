@@ -183,6 +183,16 @@ export const useShiftStore = create<ShiftState>()(
               date: dateStr,
             };
           }
+
+          // Preserve any active local pending changes so optimistic edits are never wiped by background sync
+          for (const [key, pending] of Object.entries(state.pendingChanges)) {
+            if (pending.action === 'upsert') {
+              shiftMap[key] = pending.shift;
+            } else if (pending.action === 'delete') {
+              delete shiftMap[key];
+            }
+          }
+
           return { shifts: shiftMap };
         });
       },
